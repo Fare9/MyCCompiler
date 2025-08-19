@@ -1,0 +1,67 @@
+// just put the token
+#ifndef TOK
+#define TOK(ID)
+#endif
+// in case TOK is defined, just
+// expand the ID
+#ifndef PUNCTUATOR
+#define PUNCTUATOR(ID, SP) TOK(ID)
+#endif
+// in case TOK is defined, expand
+// the ID as kw_ID
+#ifndef KEYWORD
+#define KEYWORD(ID, FLAG) TOK(kw_##ID)
+#endif
+
+// These define members of the tok::* namespace.
+
+TOK(unknown)            // Not a token.
+TOK(eof)                // End of file.
+TOK(identifier)         // abcde123
+TOK(integer_literal)    // 123, 0x123, 0123
+
+/// punctuators, part of the statements
+PUNCTUATOR(plus, "+")
+PUNCTUATOR(minus, "-")
+PUNCTUATOR(star, "*")
+PUNCTUATOR(slash, "/")
+PUNCTUATOR(percent, "%")        // Added modulo operator
+PUNCTUATOR(period, ".")
+PUNCTUATOR(comma, ",")
+PUNCTUATOR(semi, ";")
+PUNCTUATOR(colon, ":")
+PUNCTUATOR(caret, "^")
+PUNCTUATOR(equal, "=")
+PUNCTUATOR(equalequal, "==")    // Added equality comparison
+PUNCTUATOR(exclaimequal, "!=")  // Added inequality comparison
+PUNCTUATOR(hash, "#")
+PUNCTUATOR(less, "<")
+PUNCTUATOR(greater, ">")
+PUNCTUATOR(lessequal, "<=")
+PUNCTUATOR(greaterequal, ">=")
+PUNCTUATOR(ampamp, "&&")        // Added logical AND
+PUNCTUATOR(pipepipe, "||")      // Added logical OR
+PUNCTUATOR(exclaim, "!")        // Added logical NOT
+PUNCTUATOR(amp, "&")            // Added bitwise AND / address-of
+PUNCTUATOR(pipe, "|")           // Added bitwise OR
+PUNCTUATOR(l_paren, "(")
+PUNCTUATOR(r_paren, ")")
+PUNCTUATOR(l_square, "[")
+PUNCTUATOR(r_square, "]")
+PUNCTUATOR(l_brace, "{")        // Added braces
+PUNCTUATOR(r_brace, "}")
+
+/// keywords used during the program
+KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'
+KEYWORD(char, KEYALL)           // Added char type
+KEYWORD(void, KEYALL)           // Added void type
+KEYWORD(if, KEYALL)             // Added control flow
+KEYWORD(else, KEYALL)
+KEYWORD(while, KEYALL)
+KEYWORD(for, KEYALL)
+KEYWORD(return, KEYALL)
+KEYWORD(sizeof, KEYALL)         // Added sizeof operator
+
+#undef KEYWORD
+#undef PUNCTUATOR
+#undef TOK
