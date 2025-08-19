@@ -1,0 +1,51 @@
+# Build directories
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Executables
+mycc
+*.exe
+
+# Object files
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+
+# CLion IDE files
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Log files
+*.log
+
+# Test outputs
+*.out
+
+# Subprojects/external repos
+writing-a-c-compiler-tests/
+
+# Package managers
+conan/
+vcpkg/
+
+# Debug info
+*.dSYM/
+*.pdb
