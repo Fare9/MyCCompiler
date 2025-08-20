@@ -21,4 +21,4 @@ add_executable(mycc main.cpp)
 
 llvm_map_components_to_libnames(llvm_libs support core irreader)
 
-target_link_libraries(mycc ${llvm_libs} fmt::fmt Basic Lexer)
+target_link_libraries(mycc ${llvm_libs} fmt::fmt Basic Lexer Sema Parser ASTPrinter)

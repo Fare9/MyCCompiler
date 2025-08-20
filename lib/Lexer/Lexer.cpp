@@ -207,6 +207,7 @@ void Lexer::next(mycc::Token &Result) {
             default:
                 Result.setKind(tok::unknown);
                 StringRef character{CurPtr, 1};
+                CurPtr = CurPtr + 1;
                 Diags.report(getLoc(), diag::err_unexpected_token, character.str());
         }
     }

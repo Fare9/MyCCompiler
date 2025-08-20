@@ -86,15 +86,10 @@ public:
         return {Ptr, Length};
     }
 
-    std::optional<std::int64_t> getIntValue() {
-        assert(is(tok::integer_literal) && "Cannot get integer value from non-integer literal");
-        StringRef num(Ptr, Length);
-        int64_t value;
-        if (llvm::to_integer(num, value, 0)) {
-            return value;
-        } else {
-            return std::nullopt;
-        }
+    StringRef getLiteralData()
+    {
+        assert(is(tok::integer_literal) && "Cannot get literal data of non-literal");
+        return {Ptr, Length};
     }
 
     std::string to_string() {

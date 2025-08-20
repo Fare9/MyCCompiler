@@ -67,6 +67,10 @@ public:
         Keywords.addKeywords();
     }
 
+    DiagnosticsEngine &getDiagnostics() const {
+        return Diags;
+    }
+
     /// @brief Reset some of the variables from the Lexer in order to be able to
     ///     tokenize again from the beginning. This is mostly used with debugging
     ///     purposes.

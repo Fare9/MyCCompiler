@@ -2,7 +2,7 @@
 #define DIAG(ID, Level, Msg)
 #endif
 
-DIAG(err_expected, Error, "expected {0} but found {1}")
+DIAG(err_expected, Error, "expected {} but found {}")
 DIAG(err_unexpected_token, Error, "Error, unexpected character '{}' in source")
 DIAG(err_invalid_suffix_integer, Error, "invalid suffix '{0}' on integer literal")
 
