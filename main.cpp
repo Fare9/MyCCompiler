@@ -2,6 +2,10 @@
 #include "mycc/Lexer/Token.hpp"
 #include "mycc/Sema/Sema.hpp"
 #include "mycc/Parser/Parser.hpp"
+#include "mycc/IR/SimpleIR.hpp"
+#include "mycc/CodeGen/IRGen.hpp"
+#include "mycc/CodeGen/x64/X64CodeGen.hpp"
+
 
 #include "mycc/AST/AST.hpp"
 #include "mycc/AST/ASTPrinter.hpp"
@@ -12,14 +16,21 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+#include <fstream>
+#include <cstdlib>
+#include <filesystem>
 
 
 bool lexer = false;
 bool parser = false;
 bool codegen = false;
+bool compile = false;
 bool print_output = false;
 
-bool generate_assembly_file = false;
+bool tool_exists(const std::string& tool) {
+    std::string check_cmd = "command -v " + tool + " >/dev/null 2>&1";
+    return std::system(check_cmd.c_str()) == 0;
+}
 
 void print_help() {
     std::cout << "mycc - C Compiler\n"
@@ -47,7 +58,6 @@ int main(int argc, char **argv) {
             }},
             {"--print",   [&]() { print_output = true; }},
             // other options
-            {"-S",        [&]() { generate_assembly_file = true; }},
             {"--help",    [&]() { print_help(); }},
             {"-h",        [&]() { print_help(); }}
     };
@@ -60,6 +70,8 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (!lexer && !parser && !codegen) compile = true;
+
     for (const auto &F: InputFiles) {
         llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
                 FileOrErr = llvm::MemoryBuffer::getFile(F);
@@ -71,6 +83,10 @@ int main(int argc, char **argv) {
         auto Lexer = mycc::Lexer(SrcMgr, Diags);
         auto Sema = mycc::Sema(Lexer.getDiagnostics());
         auto Parser = mycc::Parser(Lexer, Sema);
+        mycc::ir::Context Context;
+        mycc::ir::Program Program;
+        auto irGen = mycc::codegen::IRGenerator(Context, Program);
+        auto x64CodeGen = mycc::codegen::x64::X64CodeGenerator();
 
         if (lexer) {
             mycc::Token Tok;
@@ -79,7 +95,8 @@ int main(int argc, char **argv) {
             while (true) {
                 Lexer.next(Tok);
                 if (Tok.is(mycc::tok::TokenKind::unknown)) {
-                    std::cout << std::endl;
+                    std::cerr << "mycc: error: unrecognized token in input\n";
+                    std::cerr << "compilation terminated.\n";
                     return 1;
                 }
                 if (print_output) {
@@ -93,16 +110,102 @@ int main(int argc, char **argv) {
             Lexer.reset();
         }
         if (parser) {
-            mycc::Program *p = Parser.parse();
+            auto p = Parser.parse();
+            Lexer.reset();
             if (!p) {
-                std::cout << "Error while parsing, no AST has been generated.\n";
+                std::cerr << "mycc: error: parse error encountered\n";
+                std::cerr << "mycc: fatal error: no AST generated due to parse errors\n";
+                std::cerr << "compilation terminated.\n";
                 return 2;
             }
             if (print_output) {
-                std::cout << "AST: " << mycc::ASTPrinter::print(p) << std::endl;
+                std::cout << "AST: " << mycc::ASTPrinter::print(p.get()) << std::endl;
+            }
+        }
+        if (codegen) {
+            auto p = Parser.parse();
+            Lexer.reset();
+            if (!p) {
+                std::cerr << "mycc: error: parse error encountered\n";
+                std::cerr << "mycc: fatal error: code generation failed due to parse errors\n";
+                std::cerr << "compilation terminated.\n";
+                return 3;
+            }
+            irGen.generateIR(*p);
+            if (print_output) {
+                std::cout << "IR output:\n" << Program.to_string() << std::endl;
+            }
+            x64CodeGen.generateAssembly(Program);
+            if (print_output) {
+                std::cout << "Assembly output:\n" << x64CodeGen.getAssembly() << std::endl;
+            }
+        }
+        if (compile) {
+            auto p = Parser.parse();
+            Lexer.reset();
+            if (!p) {
+                std::cerr << "mycc: error: parse error encountered\n";
+                std::cerr << "mycc: fatal error: code generation failed due to parse errors\n";
+                std::cerr << "compilation terminated.\n";
+                return 3;
+            }
+            irGen.generateIR(*p);
+            if (print_output) {
+                std::cout << "IR output:\n" << Program.to_string() << std::endl;
+            }
+            x64CodeGen.generateAssembly(Program);
+            if (print_output) {
+                std::cout << "Assembly output:\n" << x64CodeGen.getAssembly() << std::endl;
             }
 
-            Lexer.reset();
+            // Create assembly filename by replacing .c with .s
+            std::string assembly_name = F;
+            if (assembly_name.ends_with(".c")) {
+                assembly_name.replace(assembly_name.length() - 2, 2, ".s");
+            } else {
+                assembly_name += ".s";
+            }
+
+            // Write assembly to file
+            std::ofstream assembly_file(assembly_name);
+            if (assembly_file.is_open()) {
+                assembly_file << x64CodeGen.getAssembly();
+                assembly_file.close();
+                if (print_output) {
+                    std::cout << "Assembly written to: " << assembly_name << std::endl;
+                }
+            } else {
+                std::cerr << "mycc: error: could not open output file '" << assembly_name << "'\n";
+                std::cerr << "compilation terminated.\n";
+                return 4;
+            }
+
+            std::string executable_name = assembly_name;
+            if (executable_name.ends_with(".s"))
+                executable_name.erase(executable_name.length() - 2, 2);
+
+            std::vector<std::string> compilers = {"clang", "gcc"};
+            bool compiled = false;
+
+            for (const auto& compiler : compilers) {
+                if (tool_exists(compiler)) {
+                    std::string compile_cmd = compiler + " -o \"" + executable_name +
+                                              "\" \"" + assembly_name + "\"";
+
+                    if (std::system(compile_cmd.c_str()) == 0) {
+                        compiled = true;
+                        if (print_output) {
+                            std::cout << "Compiled with " << compiler << ": " << executable_name << std::endl;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!compiled) {
+                std::cerr << "mycc: error: no suitable compiler found or compilation failed\n";
+                return 5;
+            }
         }
     }
 

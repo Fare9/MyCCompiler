@@ -26,6 +26,12 @@ class Program {
     FuncList functions;
 public:
     Program() = default;
+    
+    ~Program() {
+        for (Function* func : functions) {
+            delete func;
+        }
+    }
 
     void add_functions(FuncList & funcs) {
         functions = std::move(funcs);
@@ -69,8 +75,14 @@ class Function {
 public:
     Function(StringRef Name, SMLoc Loc) : Name(Name), Loc(Loc) {
     }
+    
+    ~Function() {
+        for (Statement* stmt : body) {
+            delete stmt;
+        }
+    }
 
-    StringRef getName() const {
+    [[nodiscard]] StringRef getName() const {
         return Name;
     }
 
@@ -111,10 +123,12 @@ public:
 private:
     const StmtKind Kind;
 protected:
-    Statement(StmtKind Kind) : Kind(Kind) {
+    explicit Statement(StmtKind Kind) : Kind(Kind) {
     }
 public:
-    StmtKind getKind() const {
+    virtual ~Statement() = default;
+    
+    [[nodiscard]] StmtKind getKind() const {
         return Kind;
     }
 };
@@ -122,7 +136,11 @@ public:
 class ReturnStatement : public Statement {
     Expr * RetVal;
 public:
-    ReturnStatement(Expr * RetVal) : Statement(SK_Return), RetVal(RetVal) {
+    explicit ReturnStatement(Expr * RetVal) : Statement(SK_Return), RetVal(RetVal) {
+    }
+    
+    ~ReturnStatement() override {
+        delete RetVal;
     }
 
     Expr * getRetVal() const {
@@ -147,6 +165,8 @@ protected:
     }
 
 public:
+    virtual ~Expr() = default;
+    
     [[nodiscard]] ExprKind getKind() const
     {
         return Kind;

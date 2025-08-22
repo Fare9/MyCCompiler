@@ -7,6 +7,8 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <memory>
+
 namespace mycc {
 
 class Parser {
@@ -101,7 +103,7 @@ class Parser {
 public:
     Parser(Lexer &Lex, Sema &Actions);
 
-    Program * parse();
+    std::unique_ptr<Program> parse();
 };
 
 

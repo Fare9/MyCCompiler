@@ -6,10 +6,10 @@ using namespace mycc;
 Parser::Parser(Lexer &Lex, Sema &Actions) : Lex(Lex), Actions(Actions) {
 }
 
-Program * Parser::parse() {
+std::unique_ptr<Program> Parser::parse() {
     Program * p = nullptr;
     parseProgram(p);
-    return p;
+    return std::unique_ptr<Program>(p);
 }
 
 bool Parser::parseProgram(Program *&P) {
