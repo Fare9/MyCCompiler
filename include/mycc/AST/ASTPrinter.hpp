@@ -15,6 +15,7 @@ public:
 private:
     static std::string printReturnStatement(const ReturnStatement* stmt);
     static std::string printIntegerLiteral(const IntegerLiteral* expr);
+    static std::string printUnaryOperator(const UnaryOperator* expr);
 };
 
 }

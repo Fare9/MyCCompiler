@@ -20,5 +20,6 @@ public:
 
     void actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal);
     Expr* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
+    Expr* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr);
 };
 }

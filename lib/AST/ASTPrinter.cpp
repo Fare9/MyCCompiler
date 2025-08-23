@@ -31,7 +31,7 @@ std::string ASTPrinter::print(const Statement* statement) {
     
     switch (statement->getKind()) {
         case Statement::SK_Return:
-            return printReturnStatement(static_cast<const ReturnStatement*>(statement));
+            return printReturnStatement(dynamic_cast<const ReturnStatement*>(statement));
     }
     return "Unknown Statement";
 }
@@ -41,7 +41,9 @@ std::string ASTPrinter::print(const Expr* expr) {
     
     switch (expr->getKind()) {
         case Expr::Ek_Int:
-            return printIntegerLiteral(static_cast<const IntegerLiteral*>(expr));
+            return printIntegerLiteral(dynamic_cast<const IntegerLiteral*>(expr));
+        case Expr::Ek_UnaryOperator:
+            return printUnaryOperator(dynamic_cast<const UnaryOperator*>(expr));
     }
     return "Unknown Expression";
 }
@@ -57,4 +59,13 @@ std::string ASTPrinter::printReturnStatement(const ReturnStatement* stmt) {
 
 std::string ASTPrinter::printIntegerLiteral(const IntegerLiteral* expr) {
     return "IntegerLiteral(" + std::to_string(expr->getValue().getSExtValue()) + ")";
+}
+
+std::string ASTPrinter::printUnaryOperator(const UnaryOperator* expr) {
+    std::string kind_unary_operator;
+    if (expr->getOperatorKind() == UnaryOperator::UnaryOperatorKind::UopK_Negate)
+        kind_unary_operator = "Negate";
+    else if (expr->getOperatorKind() == UnaryOperator::UnaryOperatorKind::UopK_Complement)
+        kind_unary_operator = "Complement";
+    return "UnaryOperator([" + kind_unary_operator + "] " + ASTPrinter::print(expr->getExpr()) + ")";
 }

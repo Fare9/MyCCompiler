@@ -25,6 +25,8 @@ void X64CodeGenerator::generateFunction(const ir::Function& IRFunc) {
     // Emit function label
     emitDirective(".globl " + IRFunc.get_name().str());
     emitLabel(IRFunc.get_name());
+    emitInstruction("push", "rbp");
+    emitInstruction("mov", "rbp, rsp");
 
     // Generate code for each instruction
     for (const ir::Instruction* Inst : IRFunc) {
@@ -58,6 +60,8 @@ void X64CodeGenerator::generateRet(const ir::Ret& RetInst) {
     }
     
     // Standard function epilogue and return
+    emitInstruction("mov", "rsp, rbp");
+    emitInstruction("pop", "rbp");
     emitInstruction("ret");
 }
 
