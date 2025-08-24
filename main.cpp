@@ -23,6 +23,7 @@
 
 bool lexer = false;
 bool parser = false;
+bool tacky = false;
 bool codegen = false;
 bool compile = false;
 bool print_output = false;
@@ -38,9 +39,10 @@ void print_help() {
               << "\nOptions:\n"
               << "  --lex      Run lexer only\n"
               << "  --parse    Run lexer and parser\n"
-              << "  --codegen  Run full compilation (lexer, parser, codegen)\n"
-              << "  -S         Generate assembly file\n"
-              << "  --help     Show this help message\n";
+              << "  --tacky    Run lexer, parser and generate IR\n"
+              << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
+              << "  --help     Show this help message\n"
+              << "If no option is provided, all the steps will run and the output assembly is generated.\n";
 }
 
 int main(int argc, char **argv) {
@@ -52,6 +54,9 @@ int main(int argc, char **argv) {
             {"--lex",     [&]() { lexer = true; }},
             {"--parse",   [&]() {
                 parser = true;
+            }},
+            {"--tacky", [&]() {
+                tacky = true;
             }},
             {"--codegen", [&]() {
                 codegen = true;
@@ -70,7 +75,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!lexer && !parser && !codegen) compile = true;
+    if (!lexer && !parser && !tacky && !codegen) compile = true;
 
     for (const auto &F: InputFiles) {
         llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
@@ -120,6 +125,20 @@ int main(int argc, char **argv) {
             }
             if (print_output) {
                 std::cout << "AST: " << mycc::ASTPrinter::print(p.get()) << std::endl;
+            }
+        }
+        if (tacky) {
+            auto p = Parser.parse();
+            Lexer.reset();
+            if (!p) {
+                std::cerr << "mycc: error: parse error encountered\n";
+                std::cerr << "mycc: fatal error: code generation failed due to parse errors\n";
+                std::cerr << "compilation terminated.\n";
+                return 3;
+            }
+            irGen.generateIR(*p);
+            if (print_output) {
+                std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
         }
         if (codegen) {
@@ -189,8 +208,12 @@ int main(int argc, char **argv) {
 
             for (const auto& compiler : compilers) {
                 if (tool_exists(compiler)) {
-                    std::string compile_cmd = compiler + " -o \"" + executable_name +
-                                              "\" \"" + assembly_name + "\"";
+                    std::string compile_cmd = compiler;
+                    compile_cmd += " -o \"";
+                    compile_cmd += executable_name;
+                    compile_cmd += "\" \"";
+                    compile_cmd += assembly_name;
+                    compile_cmd += "\"";
 
                     if (std::system(compile_cmd.c_str()) == 0) {
                         compiled = true;
