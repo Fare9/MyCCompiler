@@ -183,6 +183,66 @@ public:
     }
 };
 
+class UnaryOp : public Instruction {
+public:
+    enum UnaryOpKind {
+        Neg,
+        Complement
+    };
+private:
+    Reg * dst;
+    UnaryOpKind Kind;
+public:
+    UnaryOp(Reg *dst, Operand *src, UnaryOpKind Kind) :
+        dst(dst), Kind(Kind) {
+        addOperand(src);
+    }
+
+    UnaryOp() = default;
+
+    void setDestination(Reg * reg) {
+        this->dst = reg;
+    }
+
+    void setSource(Operand * src) {
+        if (getNumOperands() == 0)
+            addOperand(src);
+        else
+            setOperand(0, src);
+    }
+
+    void setKind(UnaryOpKind K) {
+        this->Kind = K;
+    }
+
+    Reg * getDestination() {
+        return dst;
+    }
+
+    [[nodiscard]] const Reg * getDestination() const {
+        return dst;
+    }
+
+    [[nodiscard]] Value * getSource() const {
+        assert(getNumOperands() > 0 && "No operands to retrieve source.");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] UnaryOpKind getKind() const { return Kind; }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        if (Kind == Neg)
+            return "neg";
+        else if (Kind == Complement)
+            return "complement";
+        return "";
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return dst->to_string() + " = " + getOpcodeName().str() + " " + getSource()->to_string();
+    }
+};
+
 class Function {
     InstList Instructions;
     StringRef Name;
@@ -336,6 +396,14 @@ public:
         Values.emplace_back(RetInst);
         return RetInst;
     }
+    
+    UnaryOp* createUnaryOp(Operand* src, UnaryOp::UnaryOpKind kind) {
+        Reg* dst = createReg();  // Generate temporal register for destination
+        auto* UnaryInst = new UnaryOp(dst, src, kind);
+        Values.emplace_back(UnaryInst);
+        return UnaryInst;
+    }
+
     // All Values are automatically cleaned up when Context is destroyed
 };
 
