@@ -154,9 +154,9 @@ int main(int argc, char **argv) {
             if (print_output) {
                 std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
-            x64CodeGen.generateAssembly(Program);
+            x64CodeGen.generateX64AST(Program);
             if (print_output) {
-                std::cout << "Assembly output:\n" << x64CodeGen.getAssembly() << std::endl;
+                std::cout << "Assembly output:\n" << x64CodeGen.generateAssembly() << std::endl;
             }
         }
         if (compile) {
@@ -172,9 +172,9 @@ int main(int argc, char **argv) {
             if (print_output) {
                 std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
-            x64CodeGen.generateAssembly(Program);
+            x64CodeGen.generateX64AST(Program);
             if (print_output) {
-                std::cout << "Assembly output:\n" << x64CodeGen.getAssembly() << std::endl;
+                std::cout << "Assembly output:\n" << x64CodeGen.generateAssembly() << std::endl;
             }
 
             // Create assembly filename by replacing .c with .s
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
             // Write assembly to file
             std::ofstream assembly_file(assembly_name);
             if (assembly_file.is_open()) {
-                assembly_file << x64CodeGen.getAssembly();
+                assembly_file << x64CodeGen.generateAssembly();
                 assembly_file.close();
                 if (print_output) {
                     std::cout << "Assembly written to: " << assembly_name << std::endl;
