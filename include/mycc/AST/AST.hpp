@@ -156,6 +156,7 @@ class Expr {
 public:
     enum ExprKind {
         Ek_Int,
+        Ek_UnaryOperator,
     };
 private:
     const ExprKind Kind;
@@ -191,6 +192,42 @@ public:
 
     static bool classof(const Expr *E) {
         return E->getKind() == Ek_Int;
+    }
+};
+
+class UnaryOperator : public Expr {
+public:
+    enum UnaryOperatorKind {
+        UopK_Complement,
+        UopK_Negate,
+    };
+private:
+    SMLoc Loc;
+    const UnaryOperatorKind UnaryKind;
+    Expr * expr;
+public:
+    UnaryOperator(SMLoc Loc, UnaryOperatorKind UnaryKind, Expr * expr) :
+        Expr(Ek_UnaryOperator), Loc(Loc), UnaryKind(UnaryKind), expr(expr) {
+    }
+
+    ~UnaryOperator() override {
+        delete expr;
+    }
+
+    [[nodiscard]] UnaryOperatorKind getOperatorKind() const {
+        return UnaryKind;
+    }
+
+    Expr * getExpr() {
+        return expr;
+    }
+
+    [[nodiscard]] const Expr * getExpr() const {
+        return expr;
+    }
+
+    static bool classof(const Expr *E) {
+        return E->getKind() == Ek_UnaryOperator;
     }
 };
 

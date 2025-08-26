@@ -1,9 +1,10 @@
 #pragma once
 
 #include "mycc/IR/SimpleIR.hpp"
+#include "mycc/CodeGen/x64/x64AST.hpp"
 #include "llvm/ADT/StringRef.h"
 
-#include <sstream>
+#include <memory>
 #include <string>
 
 namespace mycc {
@@ -11,38 +12,54 @@ namespace codegen {
 namespace x64 {
 
 class X64CodeGenerator {
-    std::ostringstream Output;
+    std::unique_ptr<X64Program> Program;
     
 public:
     X64CodeGenerator() = default;
     
-    // Generate x64 assembly from IR Program
-    void generateAssembly(const ir::Program& IRProg);
-    
-    // Get the generated assembly as string
-    std::string getAssembly() const { return Output.str(); }
+    // Main generation pipeline
+    void generateX64AST(const ir::Program& IRProg);
+
+    std::string generateAssembly();
     
 private:
-    // Generate assembly for a single function
-    void generateFunction(const ir::Function& IRFunc);
+    // Phase 1: Generate X64AST from IR with pseudo-registers
+    void generateProgram(const ir::Program& IRProg);
+    void generateFunction(const ir::Function& IRFunc, X64Function* X64Func);
+    void generateInstruction(const ir::Instruction& Inst, X64Function* X64Func);
     
-    // Generate assembly for a single instruction
-    void generateInstruction(const ir::Instruction& Inst);
+    // Instruction generation methods
+    void generateMov(const ir::Mov& MovInst, X64Function* X64Func);
+    void generateRet(const ir::Ret& RetInst, X64Function* X64Func);
+    void generateUnary(const ir::UnaryOp& UnaryInst, X64Function* X64Func);
     
-    // Helper methods for specific instructions
-    void generateMov(const ir::Mov& MovInst);
-    void generateRet(const ir::Ret& RetInst);
+    // Operand conversion helpers
+    X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);
+    X64Register* convertRegister(const ir::Reg& Reg, X64Context& Ctx);
+    X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
     
-    // Helper methods for operands
-    std::string getOperandString(const ir::Value* Val);
-    std::string getRegisterName(const ir::Reg& Reg);
-    std::string getIntegerValue(const ir::Int& IntVal);
+    // Phase 2: Replace pseudo-registers with stack allocations
+    void allocateStackSlots();
+    void allocateStackSlotsForFunction(X64Function* Func);
+    void replacePseudoRegistersInInstruction(X64Instruction* Inst, X64Context& Ctx);
+    X64Operand* getOrAllocateStackSlot(unsigned pseudoID, X64Context& Ctx);
     
-    // Assembly output helpers
-    void emitLabel(StringRef Label);
-    void emitInstruction(StringRef Opcode, StringRef Operands = "");
-    void emitComment(StringRef Comment);
-    void emitDirective(StringRef Directive);
+    // Phase 3: Fix instructions and insert prologue/epilogue
+    void fixupInstructions();
+    void fixupInstructionsForFunction(X64Function* Func);
+    void replaceInstructionInFunction(X64Function* Func, X64Instruction* oldInst, 
+                                     const std::vector<X64Instruction*>& newInstructions);
+    void insertAllocationInstruction(X64Function* Func);
+    
+    // Assembly generation
+    std::string emitAssembly();
+    std::string emitFunction(const X64Function& Func);
+    std::string emitInstruction(const X64Instruction& Inst);
+    
+    // Assembly formatting helpers
+    std::string formatLabel(StringRef Name);
+    std::string formatDirective(StringRef Directive);
+    std::string formatComment(StringRef Comment);
 };
 
 }

@@ -25,7 +25,7 @@ private:
     void generateStatement(const Statement& Stmt, ir::Function* IRFunc);
     
     // Convert AST Expression to IR Value
-    ir::Value* generateExpression(const Expr& Expr);
+    ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);
 };
 
 }

@@ -141,12 +141,19 @@ void Lexer::next(mycc::Token &Result) {
             CASE('}', tok::r_brace);
             CASE('[', tok::l_square); // [ character
             CASE(']', tok::r_square); // ] character
+            CASE('~', tok::tilde);    // ~ character
 #undef CASE
             case '+':
-                formToken(Result, CurPtr+1, tok::plus);
+                if (*(CurPtr + 1) == '+')
+                    formToken(Result, CurPtr+2, tok::increment);
+                else
+                    formToken(Result, CurPtr+1, tok::plus);
                 break;
             case '-':
-                formToken(Result, CurPtr+1, tok::minus);
+                if (*(CurPtr + 1) == '-')
+                    formToken(Result, CurPtr+2, tok::decrement);
+                else
+                    formToken(Result, CurPtr+1, tok::minus);
                 break;
             case '=':
                 if (*(CurPtr + 1) == '=')

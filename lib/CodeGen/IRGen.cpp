@@ -31,7 +31,7 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
             const auto& RetStmt = dynamic_cast<const ReturnStatement&>(Stmt);
             
             // Generate IR for the return value expression
-            ir::Value* RetVal = generateExpression(*RetStmt.getRetVal());
+            ir::Value* RetVal = generateExpression(*RetStmt.getRetVal(), IRFunc);
             
             // Create return instruction
             ir::Ret* RetInst = Ctx.createRet(RetVal);
@@ -42,7 +42,7 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
     }
 }
 
-ir::Value* IRGenerator::generateExpression(const Expr& Expr) {
+ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFunc) {
     switch (Expr.getKind()) {
         case Expr::Ek_Int: {
             const auto& IntLit = dynamic_cast<const IntegerLiteral&>(Expr);
@@ -50,7 +50,24 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr) {
             // Create integer constant in IR
             return Ctx.createInt(IntLit.getValue());
         }
-        // Add more expression types as needed
+        case Expr::Ek_UnaryOperator: {
+            const auto& UnaryOp = dynamic_cast<const UnaryOperator&>(Expr);
+
+            ir::UnaryOp::UnaryOpKind Kind;
+            switch (UnaryOp.getOperatorKind()) {
+                case UnaryOperator::UnaryOperatorKind::UopK_Negate:
+                    Kind = ir::UnaryOp::UnaryOpKind::Neg;
+                    break;
+                case UnaryOperator::UnaryOperatorKind::UopK_Complement:
+                    Kind = ir::UnaryOp::UnaryOpKind::Complement;
+                    break;
+            }
+            ir::Value * source = generateExpression(*UnaryOp.getExpr(), IRFunc);
+            ir::UnaryOp * UnOp = Ctx.createUnaryOp(dynamic_cast<ir::Operand*>(source), Kind);
+            if (IRFunc != nullptr)
+                IRFunc->add_instruction(UnOp);
+            return UnOp->getDestination();
+        }
     }
     
     return nullptr; // Should not reach here

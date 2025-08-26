@@ -148,10 +148,33 @@ bool Parser::parseExpr(Expr *&E) {
     };
 
 
-    if (!Tok.is(tok::integer_literal))
+    if (Tok.is(tok::integer_literal)) {
+        E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
+        advance();
+    }
+    else if (Tok.isOneOf(tok::minus, tok::tilde)) {
+        tok::TokenKind OpKind = Tok.getKind();
+        SMLoc OpLoc = Tok.getLocation();
+        advance();
+        Expr * internalExpr = nullptr;
+        if (parseExpr(internalExpr))
+            return _errorhandler();
+        if (internalExpr == nullptr)
+            return _errorhandler();
+        if (OpKind == tok::minus)
+            E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Negate, internalExpr);
+        else if (OpKind == tok::tilde)
+            E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Complement, internalExpr);
+    }
+    else if (Tok.is(tok::l_paren)) {
+        advance();
+        if (parseExpr(E))
+            return _errorhandler();
+        if (consume(tok::r_paren))
+            return _errorhandler();
+    }
+    else
         return _errorhandler();
-    E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
-    advance();
 
     return false;
 }

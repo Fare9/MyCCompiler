@@ -30,3 +30,7 @@ Expr* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     llvm::APInt Value(64, Literal, Radix);
     return new IntegerLiteral(Loc, llvm::APSInt(Value, false));
 }
+
+Expr* Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) {
+    return new UnaryOperator(Loc, Kind, expr);
+}

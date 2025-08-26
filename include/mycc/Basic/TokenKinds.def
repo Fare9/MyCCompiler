@@ -50,6 +50,9 @@ PUNCTUATOR(l_square, "[")
 PUNCTUATOR(r_square, "]")
 PUNCTUATOR(l_brace, "{")        // Added braces
 PUNCTUATOR(r_brace, "}")
+PUNCTUATOR(tilde, "~")          // Added ~ for complement operator
+PUNCTUATOR(decrement, "--")     // Added decrement operator
+PUNCTUATOR(increment, "++")     // Added increment operator
 
 /// keywords used during the program
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'
