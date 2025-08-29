@@ -21,5 +21,6 @@ public:
     void actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal);
     Expr* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
     Expr* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr);
+    Expr* actOnBinaryOperator(SMLoc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right);
 };
 }

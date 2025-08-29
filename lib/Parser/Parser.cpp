@@ -102,7 +102,7 @@ bool Parser::parseReturnStmt(mycc::StmtList &Stmts) {
         return true;
 
     // Try to parse expression - let parseExpr handle invalid tokens
-    if (parseExpr(E))
+    if (parseExpr(E, 0))
         return true;
 
     if (consume(tok::semi))
@@ -137,7 +137,15 @@ bool Parser::parseExprList(ExprList &Exprs) {
     return false;
 }
 
-bool Parser::parseExpr(Expr *&E) {
+std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedence = {
+        {BinaryOperator::BinaryOpKind::BoK_Multiply, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Divide, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Remainder, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Add, 45},
+        {BinaryOperator::BinaryOpKind::BoK_Subtract, 45}
+};
+
+bool Parser::parseExpr(Expr *&E, int min_precedence) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::r_brace)) {
             advance();
@@ -147,6 +155,40 @@ bool Parser::parseExpr(Expr *&E) {
         return false;
     };
 
+    // We will modify the way we parse expressions to
+    // provide support for binary expressions. We will
+    // use Precedence climbing together with Recursive
+    // Descent.
+    Expr *left;
+    Expr *right;
+
+    // Parse as a left part a factor
+    parseFactor(left);
+
+    while (Tok.isOneOf(tok::plus, tok::minus, tok::star, tok::slash, tok::percent)) {
+        BinaryOperator::BinaryOpKind Kind = parseBinOp(Tok);
+        int precedence = binary_operators_precedence[Kind];
+        if (precedence < min_precedence) break;
+        SMLoc Loc = Tok.getLocation();
+        advance();
+        parseExpr(right, precedence+1);
+        left = Actions.actOnBinaryOperator(Loc, Kind, left, right);
+    }
+
+    E = left;
+
+    return false;
+}
+
+bool Parser::parseFactor(Expr *&E) {
+    auto _errorhandler = [this] {
+        while (!Tok.is(tok::r_brace)) {
+            advance();
+            if (Tok.is(tok::eof))
+                return true;
+        }
+        return false;
+    };
 
     if (Tok.is(tok::integer_literal)) {
         E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
@@ -157,7 +199,7 @@ bool Parser::parseExpr(Expr *&E) {
         SMLoc OpLoc = Tok.getLocation();
         advance();
         Expr * internalExpr = nullptr;
-        if (parseExpr(internalExpr))
+        if (parseFactor(internalExpr))
             return _errorhandler();
         if (internalExpr == nullptr)
             return _errorhandler();
@@ -168,13 +210,29 @@ bool Parser::parseExpr(Expr *&E) {
     }
     else if (Tok.is(tok::l_paren)) {
         advance();
-        if (parseExpr(E))
+        if (parseExpr(E, 0))
             return _errorhandler();
         if (consume(tok::r_paren))
             return _errorhandler();
     }
     else
         return _errorhandler();
-
     return false;
+}
+
+BinaryOperator::BinaryOpKind Parser::parseBinOp(Token& Tok) {
+    switch (Tok.getKind()) {
+        case tok::minus:
+            return BinaryOperator::BinaryOpKind::BoK_Subtract;
+        case tok::plus:
+            return BinaryOperator::BinaryOpKind::BoK_Add;
+        case tok::star:
+            return BinaryOperator::BinaryOpKind::BoK_Multiply;
+        case tok::slash:
+            return BinaryOperator::BinaryOpKind::BoK_Divide;
+        case tok::percent:
+            return BinaryOperator::BinaryOpKind::BoK_Remainder;
+        default:
+            return BinaryOperator::BinaryOpKind::BoK_None;
+    }
 }

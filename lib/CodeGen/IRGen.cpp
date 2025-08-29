@@ -68,6 +68,36 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFu
                 IRFunc->add_instruction(UnOp);
             return UnOp->getDestination();
         }
+        case Expr::Ek_BinaryOperator: {
+            const auto& BinaryOp = dynamic_cast<const BinaryOperator&>(Expr);
+
+            ir::BinaryOp::BinaryOpKind Kind;
+            switch (BinaryOp.getOperatorKind()) {
+                case BinaryOperator::BoK_Add:
+                    Kind = ir::BinaryOp::BinaryOpKind::Add;
+                    break;
+                case BinaryOperator::BoK_Subtract:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sub;
+                    break;
+                case BinaryOperator::BoK_Multiply:
+                    Kind = ir::BinaryOp::BinaryOpKind::Mul;
+                    break;
+                case BinaryOperator::BoK_Divide:
+                    Kind = ir::BinaryOp::BinaryOpKind::Div;
+                    break;
+                case BinaryOperator::BoK_Remainder:
+                    Kind = ir::BinaryOp::BinaryOpKind::Div;
+                    break;
+            }
+            // According to C standard the subexpressions of the same operation
+            // are usually unsequenced, they can be evaluated in any order.
+            ir::Value * left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+            ir::Value * right = generateExpression(*BinaryOp.getRight(), IRFunc);
+            ir::BinaryOp *BinOp = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(left), dynamic_cast<ir::Operand*>(right), Kind);
+            if (IRFunc != nullptr)
+                IRFunc->add_instruction(BinOp);
+            return BinOp->getDestination();
+        }
     }
     
     return nullptr; // Should not reach here

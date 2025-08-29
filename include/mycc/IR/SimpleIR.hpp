@@ -243,6 +243,91 @@ public:
     }
 };
 
+class BinaryOp : public Instruction {
+public:
+    enum BinaryOpKind {
+        Add,
+        Sub,
+        Mul,
+        Div,
+        Rem
+    };
+private:
+    Reg * dst;
+    BinaryOpKind Kind;
+public:
+    BinaryOp(Reg * dst, Operand * left, Operand * right, BinaryOpKind Kind)
+        : dst(dst), Kind(Kind) {
+        addOperand(left);
+        addOperand(right);
+    }
+
+    BinaryOp() = default;
+
+    void setDestination(Reg* reg) {
+        dst = reg;
+    }
+
+    void setLeft(Operand * left) {
+        if (getNumOperands() == 0) {
+            addOperand(left);
+        } else {
+            setOperand(0, left);
+        }
+    }
+
+    void setRight(Operand * right) {
+        assert(getNumOperands() >= 1 && "There must be at least one operand provided before right operand.");
+        if (getNumOperands() == 1) {
+            addOperand(right);
+        } else {
+            setOperand(1, right);
+        }
+    }
+
+    void setKind(BinaryOpKind K) {
+        Kind = K;
+    }
+
+    [[nodiscard]] Reg * getDestination() const {
+        return dst;
+    }
+
+    [[nodiscard]] Value * getLeft() const {
+        assert(getNumOperands() > 0 && "No operands to retrieve.");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] Value * getRight() const {
+        assert(getNumOperands() > 1 && "No operands to retrieve.");
+        return getOperand(1);
+    }
+
+    [[nodiscard]] BinaryOpKind getKind() const { return Kind; }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        switch (Kind) {
+            case Add:
+                return "add";
+            case Sub:
+                return "sub";
+            case Mul:
+                return "mul";
+            case Div:
+                return "div";
+            case Rem:
+                return "rem";
+            default:
+                return "";
+        }
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return dst->to_string() + " = " + getOpcodeName().str() + " " + 
+               getLeft()->to_string() + ", " + getRight()->to_string();
+    }
+};
+
 class Function {
     InstList Instructions;
     StringRef Name;
@@ -402,6 +487,13 @@ public:
         auto* UnaryInst = new UnaryOp(dst, src, kind);
         Values.emplace_back(UnaryInst);
         return UnaryInst;
+    }
+
+    BinaryOp* createBinaryOp(Operand* left, Operand* right, BinaryOp::BinaryOpKind kind) {
+        Reg* dst = createReg(); // Generate temporal register for destination
+        auto* BinaryInst = new BinaryOp(dst, left, right, kind);
+        Values.emplace_back(BinaryInst);
+        return BinaryInst;
     }
 
     // All Values are automatically cleaned up when Context is destroyed

@@ -157,6 +157,7 @@ public:
     enum ExprKind {
         Ek_Int,
         Ek_UnaryOperator,
+        Ek_BinaryOperator,
     };
 private:
     const ExprKind Kind;
@@ -228,6 +229,48 @@ public:
 
     static bool classof(const Expr *E) {
         return E->getKind() == Ek_UnaryOperator;
+    }
+};
+
+class BinaryOperator : public Expr {
+public:
+    enum BinaryOpKind {
+        BoK_Add,
+        BoK_Subtract,
+        BoK_Multiply,
+        BoK_Divide,
+        BoK_Remainder,
+        BoK_None
+    };
+private:
+    SMLoc Loc;
+    const BinaryOpKind BinaryKind;
+    Expr * left;
+    Expr * right;
+public:
+    BinaryOperator(SMLoc Loc, BinaryOpKind BinaryKind, Expr *left, Expr *right)
+        : Expr(Ek_BinaryOperator), Loc(Loc), BinaryKind(BinaryKind), left(left), right(right) {
+    }
+
+    ~BinaryOperator() override {
+        delete left;
+        delete right;
+    }
+
+    [[nodiscard]] BinaryOpKind getOperatorKind() const {
+        return BinaryKind;
+    }
+
+    [[nodiscard]] Expr * getLeft() const {
+        return left;
+    }
+
+    [[nodiscard]] Expr * getRight() const {
+        return right;
+    }
+
+    static bool classof(const Expr *E) {
+        return E->getKind() == Ek_BinaryOperator;
     }
 };
 
