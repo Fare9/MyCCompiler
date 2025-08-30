@@ -15,7 +15,7 @@ void IRGenerator::generateIR(const Program& ASTProgram) {
 ir::Function* IRGenerator::generateFunction(const Function& ASTFunc) {
     // Create new IR function
     ir::InstList instructions;
-    ir::Function* IRFunc = new ir::Function(instructions, ASTFunc.getName());
+    auto* IRFunc = new ir::Function(instructions, ASTFunc.getName());
     
     // Generate IR for each statement in the function
     for (const Statement* Stmt : ASTFunc) {
@@ -86,7 +86,22 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFu
                     Kind = ir::BinaryOp::BinaryOpKind::Div;
                     break;
                 case BinaryOperator::BoK_Remainder:
-                    Kind = ir::BinaryOp::BinaryOpKind::Div;
+                    Kind = ir::BinaryOp::BinaryOpKind::Rem;
+                    break;
+                case BinaryOperator::BoK_BitwiseAnd:
+                    Kind = ir::BinaryOp::BinaryOpKind::And;
+                    break;
+                case BinaryOperator::BoK_BitwiseOr:
+                    Kind = ir::BinaryOp::BinaryOpKind::Or;
+                    break;
+                case BinaryOperator::BoK_BitwiseXor:
+                    Kind = ir::BinaryOp::BinaryOpKind::Xor;
+                    break;
+                case BinaryOperator::BoK_LeftShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sal;
+                    break;
+                case BinaryOperator::BoK_RightShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sar;
                     break;
             }
             // According to C standard the subexpressions of the same operation

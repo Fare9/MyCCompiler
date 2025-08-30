@@ -32,6 +32,9 @@ private:
     void generateMov(const ir::Mov& MovInst, X64Function* X64Func);
     void generateRet(const ir::Ret& RetInst, X64Function* X64Func);
     void generateUnary(const ir::UnaryOp& UnaryInst, X64Function* X64Func);
+    void generateBinary(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
+    void generateDiv(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
+    void generateRem(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
     
     // Operand conversion helpers
     X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);

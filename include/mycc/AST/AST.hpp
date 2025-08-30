@@ -240,6 +240,11 @@ public:
         BoK_Multiply,
         BoK_Divide,
         BoK_Remainder,
+        BoK_LeftShift,
+        BoK_RightShift,
+        BoK_BitwiseAnd,
+        BoK_BitwiseXor,
+        BoK_BitwiseOr,
         BoK_None
     };
 private:

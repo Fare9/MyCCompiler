@@ -250,7 +250,12 @@ public:
         Sub,
         Mul,
         Div,
-        Rem
+        Rem,
+        And,
+        Or,
+        Xor,
+        Sal,
+        Sar,
     };
 private:
     Reg * dst;
@@ -317,6 +322,16 @@ public:
                 return "div";
             case Rem:
                 return "rem";
+            case And:
+                return "and";
+            case Or:
+                return "or";
+            case Xor:
+                return "xor";
+            case Sal:
+                return "sal";
+            case Sar:
+                return "sar";
             default:
                 return "";
         }

@@ -106,6 +106,21 @@ std::string ASTPrinter::printBinaryOperator(const BinaryOperator* expr, int inde
         case BinaryOperator::BinaryOpKind::BoK_Remainder:
             kind_binary_operator = "Rem";
             break;
+        case BinaryOperator::BinaryOpKind::BoK_LeftShift:
+            kind_binary_operator = "LeftShift";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_RightShift:
+            kind_binary_operator = "RightShift";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_BitwiseAnd:
+            kind_binary_operator = "BitwiseAnd";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_BitwiseXor:
+            kind_binary_operator = "BitwiseXor";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_BitwiseOr:
+            kind_binary_operator = "BitwiseOr";
+            break;
         default:
             kind_binary_operator = "Unknown";
     }
