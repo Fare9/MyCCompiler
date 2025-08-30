@@ -56,6 +56,25 @@ void X64CodeGenerator::generateInstruction(const ir::Instruction& Inst, X64Funct
         generateRet(*ret, X64Func);
     } else if (const auto * unary = dynamic_cast<const ir::UnaryOp*>(&Inst)) {
         generateUnary(*unary, X64Func);
+    } else if (const auto * binary = dynamic_cast<const ir::BinaryOp*>(&Inst)) {
+        switch (binary->getKind()) {
+            case ir::BinaryOp::Add:
+            case ir::BinaryOp::Sub:
+            case ir::BinaryOp::Mul:
+            case ir::BinaryOp::And:
+            case ir::BinaryOp::Or:
+            case ir::BinaryOp::Xor:
+            case ir::BinaryOp::Sal:
+            case ir::BinaryOp::Sar:
+                generateBinary(*binary, X64Func);
+                break;
+            case ir::BinaryOp::Div:
+                generateDiv(*binary, X64Func);
+                break;
+            case ir::BinaryOp::Rem:
+                generateRem(*binary, X64Func);
+                break;
+        }
     }
 }
 
@@ -97,12 +116,73 @@ void X64CodeGenerator::generateUnary(const ir::UnaryOp& UnaryInst, X64Function* 
     X64Func->add_instruction(Ctx.createUnary(Kind, tempRegister));
 }
 
+void X64CodeGenerator::generateBinary(const ir::BinaryOp& BinaryInstr, X64Function* X64Func) {
+    auto &Ctx = X64Func->getContext();
+    X64Operand * dst = convertOperand(BinaryInstr.getDestination(), Ctx);
+    X64Operand * src1 = convertOperand(BinaryInstr.getLeft(), Ctx);
+    X64Operand * src2 = convertOperand(BinaryInstr.getRight(), Ctx);
+    X64Binary::X64BinaryKind Kind;
+    switch (BinaryInstr.getKind()) {
+        case ir::BinaryOp::Add:
+            Kind = X64Binary::X64BinaryKind::Add;
+            break;
+        case ir::BinaryOp::Sub:
+            Kind = X64Binary::X64BinaryKind::Sub;
+            break;
+        case ir::BinaryOp::Mul:
+            Kind = X64Binary::X64BinaryKind::Mult;
+            break;
+        case ir::BinaryOp::And:
+            Kind = X64Binary::X64BinaryKind::And;
+            break;
+        case ir::BinaryOp::Or:
+            Kind = X64Binary::X64BinaryKind::Or;
+            break;
+        case ir::BinaryOp::Xor:
+            Kind = X64Binary::X64BinaryKind::Xor;
+            break;
+        case ir::BinaryOp::Sal:
+            Kind = X64Binary::X64BinaryKind::Sal;
+            break;
+        case ir::BinaryOp::Sar:
+            Kind = X64Binary::X64BinaryKind::Sar;
+            break;
+    }
+    X64Func->add_instruction(Ctx.createMov(src1, dst));
+    X64Func->add_instruction(Ctx.createBinary(Kind, src2, dst));
+}
+
+void X64CodeGenerator::generateDiv(const ir::BinaryOp& BinaryInstr, X64Function* X64Func) {
+    auto &Ctx = X64Func->getContext();
+    X64Operand * dst = convertOperand(BinaryInstr.getDestination(), Ctx);
+    X64Operand * src1 = convertOperand(BinaryInstr.getLeft(), Ctx);
+    X64Operand * src2 = convertOperand(BinaryInstr.getRight(), Ctx);
+    X64Operand * eax = Ctx.getPhysReg(PhysicalRegister::PhysReg::RAX, PhysicalRegister::Size::DWORD);
+    X64Func->add_instruction(Ctx.createMov(src1, eax));
+    X64Func->add_instruction(Ctx.createCdq());
+    X64Func->add_instruction(Ctx.createIDiv(src2));
+    X64Func->add_instruction(Ctx.createMov(eax, dst));
+}
+
+void X64CodeGenerator::generateRem(const ir::BinaryOp& BinaryInstr, X64Function* X64Func) {
+    auto &Ctx = X64Func->getContext();
+    X64Operand * dst = convertOperand(BinaryInstr.getDestination(), Ctx);
+    X64Operand * src1 = convertOperand(BinaryInstr.getLeft(), Ctx);
+    X64Operand * src2 = convertOperand(BinaryInstr.getRight(), Ctx);
+    X64Operand * eax = Ctx.getPhysReg(PhysicalRegister::PhysReg::RAX, PhysicalRegister::Size::DWORD);
+    X64Operand * edx = Ctx.getPhysReg(PhysicalRegister::PhysReg::RDX, PhysicalRegister::Size::DWORD);
+    X64Func->add_instruction(Ctx.createMov(src1, eax));
+    X64Func->add_instruction(Ctx.createCdq());
+    X64Func->add_instruction(Ctx.createIDiv(src2));
+    X64Func->add_instruction(Ctx.createMov(edx, dst));
+}
+
 // ===== Operand Conversion Helpers =====
 
 X64Operand* X64CodeGenerator::convertOperand(const ir::Value* Val, X64Context& Ctx) {
     if (const auto * Imm = dynamic_cast<const ir::Int*>(Val))
         return convertInteger(*Imm, Ctx);
-    else if (const auto * Reg = dynamic_cast<const ir::Reg*>(Val))
+    if (const auto * Reg = dynamic_cast<const ir::Reg*>(Val))
         return convertRegister(*Reg, Ctx);
     return nullptr;
 }
@@ -159,6 +239,25 @@ void X64CodeGenerator::replacePseudoRegistersInInstruction(X64Instruction* Inst,
             unary->setOperand(stackSlot);
         }
     }
+    else if (auto * binary = dynamic_cast<X64Binary*>(Inst)) {
+        X64Operand * src = binary->getSrc();
+        if (auto* pseudoReg = dynamic_cast<PseudoRegister*>(src)) {
+            X64Operand* stackSlot = getOrAllocateStackSlot(pseudoReg->getID(), Ctx);
+            binary->setSrc(stackSlot);
+        }
+        X64Operand* dst = binary->getDst();
+        if (auto* pseudoReg = dynamic_cast<PseudoRegister*>(dst)) {
+            X64Operand* stackSlot = getOrAllocateStackSlot(pseudoReg->getID(), Ctx);
+            binary->setDst(stackSlot);
+        }
+    }
+    else if (auto * div = dynamic_cast<X64IDiv*>(Inst)) {
+        X64Operand* op = div->getOperand();
+        if (auto* pseudoReg = dynamic_cast<PseudoRegister*>(op)) {
+            X64Operand* stackSlot = getOrAllocateStackSlot(pseudoReg->getID(), Ctx);
+            div->setOperand(stackSlot);
+        }
+    }
     // X64Ret has no operands to replace
 }
 
@@ -212,6 +311,88 @@ void X64CodeGenerator::fixupInstructionsForFunction(X64Function* Func) {
                 
                 // Mark this instruction for replacement
                 replacements.emplace_back(mov, std::move(newInstructions));
+            }
+        }
+        else if (auto * binOp = dynamic_cast<X64Binary*>(Inst)) {
+            // Check for MEM to MEM move (both operands are X64Stack)
+            X64Operand* src = binOp->getSrc();
+            X64Operand* dst = binOp->getDst();
+            auto *srcStack = dynamic_cast<X64Stack*>(src);
+            auto *dstStack = dynamic_cast<X64Stack*>(dst);
+
+            // If both source and destination are memory, we need to fix this
+            if (srcStack != nullptr && dstStack != nullptr) {
+                // Use R10D as intermediate register
+                auto *R10D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+                auto *CL = Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::BYTE);
+                PhysicalRegister * srcRegister;
+                // Create two new instructions:
+                // 1. MOV R10D, [src_memory]
+                // 2. BinOp [dst_memory], R10D
+                std::vector<X64Instruction*> newInstructions;
+                // SAL/SAR shift count must be in CL register
+                if (binOp->getKind() == X64Binary::Sal || binOp->getKind() == X64Binary::Sar) {
+                    auto *srcStackByte = Ctx.getAllocatedStack(srcStack, X64Stack::Size::BYTE);
+                    newInstructions.push_back(Ctx.createMov(srcStackByte, CL));
+                    srcRegister = CL;
+                } else {
+                    newInstructions.push_back(Ctx.createMov(srcStack, R10D));
+                    srcRegister = R10D;
+                }
+                // the destination for a Mul cannot be a memory address, so in case we have
+                // a memory address, replace it for a real register.
+                if (binOp->getKind() == X64Binary::Mult) {
+                    auto *R11D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R11, PhysicalRegister::Size::DWORD);
+                    newInstructions.push_back(Ctx.createMov(dst, R11D));
+                    newInstructions.push_back(Ctx.createBinary(binOp->getKind(), srcRegister, R11D));
+                    newInstructions.push_back(Ctx.createMov(R11D, dstStack));
+                }
+                else {
+                    newInstructions.push_back(Ctx.createBinary(binOp->getKind(), srcRegister, dstStack));
+                }
+                // Mark this instruction for replacement
+                replacements.emplace_back(binOp, std::move(newInstructions));
+            }
+            // Same as before, but in this case, we can have that source is an immediate value
+            // and destination is a memory address
+            else if (dstStack != nullptr && binOp->getKind() == X64Binary::Mult) {
+                std::vector<X64Instruction*> newInstructions;
+                auto *R11D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R11, PhysicalRegister::Size::DWORD);
+                newInstructions.push_back(Ctx.createMov(dst, R11D));
+                newInstructions.push_back(Ctx.createBinary(binOp->getKind(), src, R11D));
+                newInstructions.push_back(Ctx.createMov(R11D, dstStack));
+                replacements.emplace_back(binOp, std::move(newInstructions));
+            }
+            // Handle SAL/SAR where shift count is not immediate and not in CL
+            else if ((binOp->getKind() == X64Binary::Sal || binOp->getKind() == X64Binary::Sar)) {
+                auto* srcImm = dynamic_cast<X64Int*>(src);
+                // If source is not immediate, it must go into CL register
+                if (srcImm == nullptr) {
+                    std::vector<X64Instruction*> newInstructions;
+                    auto *CL = Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::BYTE);
+                    newInstructions.push_back(Ctx.createMov(src, CL));
+                    newInstructions.push_back(Ctx.createBinary(binOp->getKind(), CL, dst));
+                    replacements.emplace_back(binOp, std::move(newInstructions));
+                }
+            }
+        }
+        else if (auto * div = dynamic_cast<X64IDiv*>(Inst)) {
+            X64Operand* op = div->getOperand();
+            auto* Imm = dynamic_cast<X64Int*>(op);
+
+            if (Imm != nullptr) {
+                // Use R10D as intermediate register
+                auto *R10D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+
+                // Create two new instructions
+                // 1. Mov R10D, Int
+                // 2. IDIV R10D
+                std::vector<X64Instruction*> newInstructions;
+                newInstructions.push_back(Ctx.createMov(Imm, R10D));
+                newInstructions.push_back(Ctx.createIDiv(R10D));
+
+                // Mark this instruction for replacement
+                replacements.emplace_back(div, std::move(newInstructions));
             }
         }
     }

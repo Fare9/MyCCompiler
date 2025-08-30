@@ -15,7 +15,7 @@ void IRGenerator::generateIR(const Program& ASTProgram) {
 ir::Function* IRGenerator::generateFunction(const Function& ASTFunc) {
     // Create new IR function
     ir::InstList instructions;
-    ir::Function* IRFunc = new ir::Function(instructions, ASTFunc.getName());
+    auto* IRFunc = new ir::Function(instructions, ASTFunc.getName());
     
     // Generate IR for each statement in the function
     for (const Statement* Stmt : ASTFunc) {
@@ -67,6 +67,51 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFu
             if (IRFunc != nullptr)
                 IRFunc->add_instruction(UnOp);
             return UnOp->getDestination();
+        }
+        case Expr::Ek_BinaryOperator: {
+            const auto& BinaryOp = dynamic_cast<const BinaryOperator&>(Expr);
+
+            ir::BinaryOp::BinaryOpKind Kind;
+            switch (BinaryOp.getOperatorKind()) {
+                case BinaryOperator::BoK_Add:
+                    Kind = ir::BinaryOp::BinaryOpKind::Add;
+                    break;
+                case BinaryOperator::BoK_Subtract:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sub;
+                    break;
+                case BinaryOperator::BoK_Multiply:
+                    Kind = ir::BinaryOp::BinaryOpKind::Mul;
+                    break;
+                case BinaryOperator::BoK_Divide:
+                    Kind = ir::BinaryOp::BinaryOpKind::Div;
+                    break;
+                case BinaryOperator::BoK_Remainder:
+                    Kind = ir::BinaryOp::BinaryOpKind::Rem;
+                    break;
+                case BinaryOperator::BoK_BitwiseAnd:
+                    Kind = ir::BinaryOp::BinaryOpKind::And;
+                    break;
+                case BinaryOperator::BoK_BitwiseOr:
+                    Kind = ir::BinaryOp::BinaryOpKind::Or;
+                    break;
+                case BinaryOperator::BoK_BitwiseXor:
+                    Kind = ir::BinaryOp::BinaryOpKind::Xor;
+                    break;
+                case BinaryOperator::BoK_LeftShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sal;
+                    break;
+                case BinaryOperator::BoK_RightShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sar;
+                    break;
+            }
+            // According to C standard the subexpressions of the same operation
+            // are usually unsequenced, they can be evaluated in any order.
+            ir::Value * left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+            ir::Value * right = generateExpression(*BinaryOp.getRight(), IRFunc);
+            ir::BinaryOp *BinOp = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(left), dynamic_cast<ir::Operand*>(right), Kind);
+            if (IRFunc != nullptr)
+                IRFunc->add_instruction(BinOp);
+            return BinOp->getDestination();
         }
     }
     

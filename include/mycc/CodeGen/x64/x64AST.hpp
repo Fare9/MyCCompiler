@@ -323,6 +323,119 @@ public:
     }
 };
 
+class X64Binary : public X64Instruction {
+public:
+    enum X64BinaryKind {
+        Add,
+        Sub,
+        Mult,
+        And,
+        Or,
+        Xor,
+        Sal,
+        Sar
+    };
+private:
+    X64BinaryKind Kind;
+    X64Operand * src;
+    X64Operand * dst;
+public:
+    X64Binary() = default;
+
+    X64Binary(X64BinaryKind Kind, X64Operand * src, X64Operand * dst) :
+        Kind(Kind), src(src), dst(dst) {
+    }
+
+    void setKind(X64BinaryKind K) {
+        Kind = K;
+    }
+
+    void setSrc(X64Operand * S) {
+        src = S;
+    }
+
+    void setDst(X64Operand * D) {
+        dst = D;
+    }
+
+    [[nodiscard]] X64BinaryKind getKind() const {
+        return Kind;
+    }
+
+    [[nodiscard]] X64Operand * getSrc() const {
+        return src;
+    }
+
+    [[nodiscard]] X64Operand * getDst() const {
+        return dst;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        std::string opcode;
+        switch (Kind) {
+            case Add:
+                opcode = "add";
+                break;
+            case Sub:
+                opcode = "sub";
+                break;
+            case Mult:
+                opcode = "imul";
+                break;
+            case And:
+                opcode = "and";
+                break;
+            case Or:
+                opcode = "or";
+                break;
+            case Xor:
+                opcode = "xor";
+                break;
+            case Sal:
+                opcode = "sal";
+                break;
+            case Sar:
+                opcode = "sar";
+                break;
+        }
+        return opcode + " "
+            + dst->to_string() +", "
+            + src->to_string();
+    }
+};
+
+class X64IDiv : public X64Instruction {
+private:
+    X64Operand * Op;
+public:
+    X64IDiv() = default;
+
+    X64IDiv(X64Operand * Op) :
+        Op(Op) {
+    }
+
+    void setOperand(X64Operand * O) {
+        Op = O;
+    }
+
+    [[nodiscard]] X64Operand * getOperand() const {
+        return Op;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "idiv " + Op->to_string();
+    }
+};
+
+class X64Cdq : public X64Instruction {
+public:
+    X64Cdq() = default;
+
+    [[nodiscard]] std::string to_string() const override {
+        return "cdq";
+    }
+};
+
 class X64Ret : public X64Instruction {
 public:
     X64Ret() = default;
@@ -491,6 +604,14 @@ public:
         PhysicalRegister* rbp = getPhysReg(PhysicalRegister::RBP);
         return createStack(llvm::APSInt(llvm::APInt(64, StackOffset)), rbp, size);
     }
+
+    // @brief Given an already generated stack access, generate another one
+    // with any other size.
+    X64Stack* getAllocatedStack(X64Stack* stack_access, X64Stack::Size size = X64Stack::QWORD) {
+        assert(stack_access != nullptr && "Stack access provided must not be nullptr.");
+        PhysicalRegister* rbp = getPhysReg(PhysicalRegister::RBP);
+        return createStack(llvm::APSInt(stack_access->getOffset()), rbp, size);
+    }
     
     int getStackOffset() const {
         return StackOffset;
@@ -508,7 +629,25 @@ public:
         Instructions.emplace_back(inst);
         return inst;
     }
-    
+
+    X64Binary* createBinary(X64Binary::X64BinaryKind kind, X64Operand *Src, X64Operand *Dst) {
+        auto* inst = new X64Binary(kind, Src, Dst);
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
+    X64IDiv* createIDiv(X64Operand * op) {
+        auto* inst = new X64IDiv(op);
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
+    X64Cdq* createCdq() {
+        auto* inst = new X64Cdq();
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
     X64Ret* createRet() {
         auto* inst = new X64Ret();
         Instructions.emplace_back(inst);

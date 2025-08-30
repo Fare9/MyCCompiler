@@ -127,7 +127,6 @@ void Lexer::next(mycc::Token &Result) {
     case ch:                                \
         formToken(Result, CurPtr + 1, tok); \
         break
-            CASE('#', tok::hash);    // # character
             CASE('*', tok::star);    // * character
             CASE(',', tok::comma);   // , character
             CASE('.', tok::period);  // . character
@@ -170,12 +169,16 @@ void Lexer::next(mycc::Token &Result) {
             case '<':
                 if (*(CurPtr + 1) == '=')
                     formToken(Result, CurPtr+2, tok::lessequal);
+                else if (*(CurPtr + 1) == '<')
+                    formToken(Result, CurPtr+2, tok::lessless);
                 else
                     formToken(Result, CurPtr+1, tok::less);
                 break;
             case '>':
                 if (*(CurPtr + 1) == '=')
                     formToken(Result, CurPtr+2, tok::greaterequal);
+                else if (*(CurPtr + 1) == '>')
+                    formToken(Result, CurPtr+2, tok::greatergreater);
                 else
                     formToken(Result, CurPtr+1, tok::greater);
                 break;
@@ -210,6 +213,14 @@ void Lexer::next(mycc::Token &Result) {
                 else {
                     formToken(Result, CurPtr + 1, tok::slash);
                 }
+                break;
+            case '#':
+                // for the moment skip it until we have some code
+                // to manage pragmas and includes...
+                while (*CurPtr && !charinfo::isVerticalWhitespace(*CurPtr)) {
+                    ++CurPtr;
+                }
+                next(Result);
                 break;
             default:
                 Result.setKind(tok::unknown);

@@ -39,6 +39,8 @@ PUNCTUATOR(less, "<")
 PUNCTUATOR(greater, ">")
 PUNCTUATOR(lessequal, "<=")
 PUNCTUATOR(greaterequal, ">=")
+PUNCTUATOR(lessless, "<<")      // Added left shift
+PUNCTUATOR(greatergreater, ">>") // Added right shift
 PUNCTUATOR(ampamp, "&&")        // Added logical AND
 PUNCTUATOR(pipepipe, "||")      // Added logical OR
 PUNCTUATOR(exclaim, "!")        // Added logical NOT

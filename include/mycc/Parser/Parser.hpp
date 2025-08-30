@@ -99,7 +99,10 @@ class Parser {
     bool parseReturnStmt(StmtList &Stmts);
 
     bool parseExprList(ExprList &Exprs);
-    bool parseExpr(Expr *&E);
+    bool parseExpr(Expr *&E, int min_precedence = 0);
+    bool parseFactor(Expr *&E);
+
+    static BinaryOperator::BinaryOpKind parseBinOp(Token& Tok);
 public:
     Parser(Lexer &Lex, Sema &Actions);
 

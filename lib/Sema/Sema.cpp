@@ -34,3 +34,7 @@ Expr* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
 Expr* Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) {
     return new UnaryOperator(Loc, Kind, expr);
 }
+
+Expr* Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) {
+    return new BinaryOperator(Loc, Kind, left, right);
+}
