@@ -6,8 +6,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/SMLoc.h"
 
-#include <optional>
-
 namespace mycc {
 
 class Lexer;
@@ -39,14 +37,14 @@ public:
     /// @brief Check if the current TokenKind is the provided one
     /// @param K the kind to check
     /// @return `true` if token is the provided one, `false` otherwise
-    bool is(tok::TokenKind K) const {
+    [[nodiscard]] bool is(tok::TokenKind K) const {
         return Kind == K;
     }
 
     /// @brief Negative version of previous function, check if token is not the given one
     /// @param K the kind to check it is not
     /// @return `true` if token is not the provided one, `false` otherwise
-    bool isNot(tok::TokenKind K) const {
+    [[nodiscard]] bool isNot(tok::TokenKind K) const {
         return Kind != K;
     }
 
@@ -54,7 +52,7 @@ public:
     /// @param K1 first Kind to check
     /// @param K2 second Kind to check
     /// @return `true` if it's any of the provided types
-    bool isOneOf(tok::TokenKind K1, tok::TokenKind K2) const
+    [[nodiscard]] bool isOneOf(tok::TokenKind K1, tok::TokenKind K2) const
     {
         return is(K1) || is(K2);
     }

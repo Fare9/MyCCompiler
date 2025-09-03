@@ -2,7 +2,6 @@
 #pragma once
 
 #include "mycc/Basic/Diagnostic.hpp"
-#include "mycc/Basic/LLVM.hpp"
 #include "mycc/Lexer/Token.hpp"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -67,7 +66,7 @@ public:
         Keywords.addKeywords();
     }
 
-    DiagnosticsEngine &getDiagnostics() const {
+    [[nodiscard]] DiagnosticsEngine &getDiagnostics() const {
         return Diags;
     }
 

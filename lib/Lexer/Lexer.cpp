@@ -92,7 +92,7 @@ namespace charinfo
 
 } //! namespace charinfo
 
-void Lexer::next(mycc::Token &Result) {
+void Lexer::next(Token &Result) {
     // move current pointer while is not a white space or the buffer is not empty
     while (*CurPtr && charinfo::isWhitespace(*CurPtr)) {
         ++CurPtr;
@@ -114,120 +114,118 @@ void Lexer::next(mycc::Token &Result) {
         return;
     }
     // parse possible digit number
-    else if (charinfo::isDigit(*CurPtr)) {
+    if (charinfo::isDigit(*CurPtr)) {
         number(Result);
         return;
     }
     // check for other possible tokens
-    else {
-        switch (*CurPtr) {
+    switch (*CurPtr) {
             // These tokens are just one character, we can create a macro
             // that will expand to create a case for each one.
 #define CASE(ch, tok)                       \
     case ch:                                \
         formToken(Result, CurPtr + 1, tok); \
         break
-            CASE('*', tok::star);    // * character
-            CASE(',', tok::comma);   // , character
-            CASE('.', tok::period);  // . character
-            CASE('%', tok::percent);
-            CASE('^', tok::caret);
-            CASE(':', tok::colon);   // : character
-            CASE(';', tok::semi);    // ; character (end of code line)
-            CASE('(', tok::l_paren); // beginning of parenthesis
-            CASE(')', tok::r_paren); // end of parenthesis
-            CASE('{', tok::l_brace);
-            CASE('}', tok::r_brace);
-            CASE('[', tok::l_square); // [ character
-            CASE(']', tok::r_square); // ] character
-            CASE('~', tok::tilde);    // ~ character
+        CASE('*', tok::star);    // * character
+        CASE(',', tok::comma);   // , character
+        CASE('.', tok::period);  // . character
+        CASE('%', tok::percent);
+        CASE('^', tok::caret);
+        CASE(':', tok::colon);   // : character
+        CASE(';', tok::semi);    // ; character (end of code line)
+        CASE('(', tok::l_paren); // beginning of parenthesis
+        CASE(')', tok::r_paren); // end of parenthesis
+        CASE('{', tok::l_brace);
+        CASE('}', tok::r_brace);
+        CASE('[', tok::l_square); // [ character
+        CASE(']', tok::r_square); // ] character
+        CASE('~', tok::tilde);    // ~ character
 #undef CASE
-            case '+':
-                if (*(CurPtr + 1) == '+')
-                    formToken(Result, CurPtr+2, tok::increment);
-                else
-                    formToken(Result, CurPtr+1, tok::plus);
-                break;
-            case '-':
-                if (*(CurPtr + 1) == '-')
-                    formToken(Result, CurPtr+2, tok::decrement);
-                else
-                    formToken(Result, CurPtr+1, tok::minus);
-                break;
-            case '=':
-                if (*(CurPtr + 1) == '=')
-                    formToken(Result, CurPtr+2, tok::equalequal);
-                else
-                    formToken(Result, CurPtr+1, tok::equal);
-                break;
-            case '!':
-                if (*(CurPtr + 1) == '=')
-                    formToken(Result, CurPtr+2, tok::exclaimequal);
-                else
-                    formToken(Result, CurPtr+1, tok::exclaim);
-                break;
-            case '<':
-                if (*(CurPtr + 1) == '=')
-                    formToken(Result, CurPtr+2, tok::lessequal);
-                else if (*(CurPtr + 1) == '<')
-                    formToken(Result, CurPtr+2, tok::lessless);
-                else
-                    formToken(Result, CurPtr+1, tok::less);
-                break;
-            case '>':
-                if (*(CurPtr + 1) == '=')
-                    formToken(Result, CurPtr+2, tok::greaterequal);
-                else if (*(CurPtr + 1) == '>')
-                    formToken(Result, CurPtr+2, tok::greatergreater);
-                else
-                    formToken(Result, CurPtr+1, tok::greater);
-                break;
-            case '&':
-                if (*(CurPtr + 1) == '&')
-                    formToken(Result, CurPtr+2, tok::ampamp);
-                else
-                    formToken(Result, CurPtr+1, tok::amp);
-                break;
-            case '|':
-                if (*(CurPtr + 1) == '|')
-                    formToken(Result, CurPtr+2, tok::pipepipe);
-                else
-                    formToken(Result, CurPtr+1, tok::pipe);
-                break;
-            case '/':
-                // long comment
-                if (*(CurPtr + 1) == '*') {
-                    comment();
-                    // after the comment we need to return a Token
-                    next(Result);
-                }
-                // one line comment
-                else if (*(CurPtr + 1) == '/') {
-                    while (*CurPtr && !charinfo::isVerticalWhitespace(*CurPtr)) {
-                        ++CurPtr;
-                    }
-                    // after the comment we need to return a Token
-                    next(Result);
-                }
-                // slash token
-                else {
-                    formToken(Result, CurPtr + 1, tok::slash);
-                }
-                break;
-            case '#':
-                // for the moment skip it until we have some code
-                // to manage pragmas and includes...
+        case '+':
+            if (*(CurPtr + 1) == '+')
+                formToken(Result, CurPtr+2, tok::increment);
+            else
+                formToken(Result, CurPtr+1, tok::plus);
+            break;
+        case '-':
+            if (*(CurPtr + 1) == '-')
+                formToken(Result, CurPtr+2, tok::decrement);
+            else
+                formToken(Result, CurPtr+1, tok::minus);
+            break;
+        case '=':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::equalequal);
+            else
+                formToken(Result, CurPtr+1, tok::equal);
+            break;
+        case '!':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::exclaimequal);
+            else
+                formToken(Result, CurPtr+1, tok::exclaim);
+            break;
+        case '<':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::lessequal);
+            else if (*(CurPtr + 1) == '<')
+                formToken(Result, CurPtr+2, tok::lessless);
+            else
+                formToken(Result, CurPtr+1, tok::less);
+            break;
+        case '>':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::greaterequal);
+            else if (*(CurPtr + 1) == '>')
+                formToken(Result, CurPtr+2, tok::greatergreater);
+            else
+                formToken(Result, CurPtr+1, tok::greater);
+            break;
+        case '&':
+            if (*(CurPtr + 1) == '&')
+                formToken(Result, CurPtr+2, tok::ampamp);
+            else
+                formToken(Result, CurPtr+1, tok::amp);
+            break;
+        case '|':
+            if (*(CurPtr + 1) == '|')
+                formToken(Result, CurPtr+2, tok::pipepipe);
+            else
+                formToken(Result, CurPtr+1, tok::pipe);
+            break;
+        case '/':
+            // long comment
+            if (*(CurPtr + 1) == '*') {
+                comment();
+                // after the comment we need to return a Token
+                next(Result);
+            }
+            // one line comment
+            else if (*(CurPtr + 1) == '/') {
                 while (*CurPtr && !charinfo::isVerticalWhitespace(*CurPtr)) {
                     ++CurPtr;
                 }
+                // after the comment we need to return a Token
                 next(Result);
-                break;
-            default:
-                Result.setKind(tok::unknown);
-                StringRef character{CurPtr, 1};
-                CurPtr = CurPtr + 1;
-                Diags.report(getLoc(), diag::err_unexpected_token, character.str());
-        }
+            }
+            // slash token
+            else {
+                formToken(Result, CurPtr + 1, tok::slash);
+            }
+            break;
+        case '#':
+            // for the moment skip it until we have some code
+            // to manage pragmas and includes...
+            while (*CurPtr && !charinfo::isVerticalWhitespace(*CurPtr)) {
+                ++CurPtr;
+            }
+            next(Result);
+            break;
+        default:
+            Result.setKind(tok::unknown);
+            StringRef character{CurPtr, 1};
+            CurPtr = CurPtr + 1;
+            Diags.report(getLoc(), diag::err_unexpected_token, character.str());
     }
 }
 

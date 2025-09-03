@@ -33,8 +33,8 @@ class Instruction : public Value {
 public:
     Instruction() = default;
     explicit Instruction(std::vector<Value*> operands) : operands(std::move(operands)) {}
-    
-    virtual ~Instruction() = default;
+
+    ~Instruction() override = default;
     
     // Operand access
     [[nodiscard]] size_t getNumOperands() const { return operands.size(); }
@@ -193,7 +193,7 @@ private:
     Reg * dst;
     UnaryOpKind Kind;
 public:
-    UnaryOp(Reg *dst, Operand *src, UnaryOpKind Kind) :
+    UnaryOp(Reg *dst, Operand *src, const UnaryOpKind Kind) :
         dst(dst), Kind(Kind) {
         addOperand(src);
     }
@@ -233,7 +233,7 @@ public:
     [[nodiscard]] StringRef getOpcodeName() const override {
         if (Kind == Neg)
             return "neg";
-        else if (Kind == Complement)
+        if (Kind == Complement)
             return "complement";
         return "";
     }
@@ -404,19 +404,19 @@ class Program {
 
 public:
     Program() : Ctx(std::make_unique<Context>()) {}
-    explicit Program(StringRef Name) : Name(Name), Ctx(std::make_unique<Context>()) {}
+    explicit Program(const StringRef Name) : Name(Name), Ctx(std::make_unique<Context>()) {}
 
     Program(FuncList & Funcs, StringRef Name) :
             Funcs(std::move(Funcs)), Name(Name), Ctx(std::make_unique<Context>()) {
     }
 
     ~Program() {
-        for (auto & F : Funcs) {
+        for (const auto & F : Funcs) {
             delete F;
         }
     }
 
-    Context& getContext() { return *Ctx; }
+    [[nodiscard]] Context& getContext() const { return *Ctx; }
 
     [[nodiscard]] StringRef get_name() const {
         return Name;

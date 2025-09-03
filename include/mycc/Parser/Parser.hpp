@@ -22,7 +22,7 @@ class Parser {
 
     /// @brief Get the current diagnostic engine from lexer
     /// @return diagnostic engine for errors
-    DiagnosticsEngine &getDiagnostics() const {
+    [[nodiscard]] DiagnosticsEngine &getDiagnostics() const {
         return Lex.getDiagnostics();
     }
 
@@ -35,8 +35,7 @@ class Parser {
     /// @brief look for an expected token, in case an unexpected token is found report it
     /// @param ExpectedTok token we expect now
     /// @return true in case there was an error, false everything fine
-    bool expect(tok::TokenKind ExpectedTok)
-    {
+    [[nodiscard]] bool expect(tok::TokenKind ExpectedTok) const {
         if (Tok.is(ExpectedTok)) // check if is expected token
             return false; // no error
 
@@ -47,7 +46,7 @@ class Parser {
         if (!Expected)
             Expected = tok::getTokenName(ExpectedTok);
 
-        llvm::StringRef Actual(Tok.getLocation().getPointer(), Tok.getLength());
+        StringRef Actual(Tok.getLocation().getPointer(), Tok.getLength());
 
         getDiagnostics().report(Tok.getLocation(), diag::err_expected, Expected, Actual.str());
 

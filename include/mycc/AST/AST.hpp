@@ -1,12 +1,10 @@
 #pragma once
 
 #include "mycc/Basic/LLVM.hpp"
-#include "mycc/Basic/TokenKinds.hpp"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
 
-#include <string>
 #include <utility>
 #include <vector>
 
