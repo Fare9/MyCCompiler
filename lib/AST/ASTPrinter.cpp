@@ -78,11 +78,18 @@ std::string ASTPrinter::printIntegerLiteral(const IntegerLiteral* expr, int inde
 
 std::string ASTPrinter::printUnaryOperator(const UnaryOperator* expr, int indent) {
     std::string kind_unary_operator;
-    if (expr->getOperatorKind() == UnaryOperator::UnaryOperatorKind::UopK_Negate)
-        kind_unary_operator = "Negate";
-    else if (expr->getOperatorKind() == UnaryOperator::UnaryOperatorKind::UopK_Complement)
-        kind_unary_operator = "Complement";
-    
+    switch (expr->getKind()) {
+        case UnaryOperator::UopK_Negate:
+            kind_unary_operator = "Negate";
+            break;
+        case UnaryOperator::UopK_Complement:
+            kind_unary_operator = "Complement";
+            break;
+        case UnaryOperator::UopK_Not:
+            kind_unary_operator = "Not";
+            break;
+    }
+
     std::string output = getIndent(indent) + "UnaryOperator: " + kind_unary_operator + "\n";
     output += print(expr->getExpr(), indent + 1);
     return output;
@@ -120,6 +127,33 @@ std::string ASTPrinter::printBinaryOperator(const BinaryOperator* expr, int inde
             break;
         case BinaryOperator::BinaryOpKind::BoK_BitwiseOr:
             kind_binary_operator = "BitwiseOr";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_LowerThan:
+            kind_binary_operator = "LowerThan";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_LowerEqual:
+            kind_binary_operator = "LowerEqual";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_GreaterThan:
+            kind_binary_operator = "GreaterThan";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_GreaterEqual:
+            kind_binary_operator = "GreaterEqual";
+            break;
+        case BinaryOperator::BinaryOpKind::Bok_Equal:
+            kind_binary_operator = "Equal";
+            break;
+        case BinaryOperator::BinaryOpKind::Bok_NotEqual:
+            kind_binary_operator = "NotEqual";
+            break;
+        case BinaryOperator::BinaryOpKind::Bok_And:
+            kind_binary_operator = "And";
+            break;
+        case BinaryOperator::BinaryOpKind::Bok_Or:
+            kind_binary_operator = "Or";
+            break;
+        case BinaryOperator::BinaryOpKind::BoK_None:
+            kind_binary_operator = "None";
             break;
         default:
             kind_binary_operator = "Unknown";

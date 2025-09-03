@@ -199,6 +199,7 @@ public:
     enum UnaryOperatorKind {
         UopK_Complement,
         UopK_Negate,
+        UopK_Not,
     };
 private:
     SMLoc Loc;
@@ -233,6 +234,7 @@ public:
 class BinaryOperator : public Expr {
 public:
     enum BinaryOpKind {
+        // Chapter 3
         BoK_Add,
         BoK_Subtract,
         BoK_Multiply,
@@ -243,6 +245,15 @@ public:
         BoK_BitwiseAnd,
         BoK_BitwiseXor,
         BoK_BitwiseOr,
+        // Chapter 4
+        BoK_LowerThan,
+        BoK_LowerEqual,
+        BoK_GreaterThan,
+        BoK_GreaterEqual,
+        Bok_Equal,
+        Bok_NotEqual,
+        Bok_And,
+        Bok_Or,
         BoK_None
     };
 private:

@@ -1,6 +1,8 @@
 
 #include "mycc/Parser/Parser.hpp"
 
+#include "mycc/AST/AST.hpp"
+
 using namespace mycc;
 
 Parser::Parser(Lexer &Lex, Sema &Actions) : Lex(Lex), Actions(Actions) {
@@ -146,6 +148,13 @@ std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedenc
    // Bitwise shift operators (precedence 5 in C standard)
 {BinaryOperator::BinaryOpKind::BoK_LeftShift, 40},
 {BinaryOperator::BinaryOpKind::BoK_RightShift, 40},
+   // minor than, minor equal, greater than, greater equal
+    {BinaryOperator::BinaryOpKind::BoK_LowerThan, 35},
+{BinaryOperator::BinaryOpKind::BoK_LowerEqual, 35},
+{BinaryOperator::BinaryOpKind::BoK_GreaterThan, 35},
+{BinaryOperator::BinaryOpKind::BoK_GreaterEqual, 35},
+{BinaryOperator::BinaryOpKind::Bok_Equal, 30},
+{BinaryOperator::BinaryOpKind::Bok_NotEqual, 30},
   // Relational operators would be ~35 (precedence 6-7)
   // Equality operators would be ~30 (precedence 7)
   // Bitwise AND (precedence 8 in C standard)
@@ -153,7 +162,10 @@ std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedenc
   // Bitwise XOR (precedence 9 in C standard)
 {BinaryOperator::BinaryOpKind::BoK_BitwiseXor, 20},
   // Bitwise OR (precedence 10 in C standard)
-{BinaryOperator::BinaryOpKind::BoK_BitwiseOr, 15}
+{BinaryOperator::BinaryOpKind::BoK_BitwiseOr, 15},
+    // Logical AND and OR
+{BinaryOperator::BinaryOpKind::Bok_And, 10},
+{BinaryOperator::BinaryOpKind::Bok_Or, 5},
 };
 
 bool Parser::parseExpr(Expr *&E, int min_precedence) {
@@ -176,7 +188,27 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
     // Parse as a left part a factor
     parseFactor(left);
 
-    while (Tok.isOneOf(tok::plus, tok::minus, tok::star, tok::slash, tok::percent, tok::lessless, tok::greatergreater, tok::amp, tok::caret, tok::pipe)) {
+    while (Tok.isOneOf(
+            // Chapter 3
+            tok::plus,
+            tok::minus,
+            tok::lessless,
+            tok::greatergreater,
+            tok::star,
+            tok::slash,
+            tok::percent,
+            tok::amp,
+            tok::caret,
+            tok::pipe,
+            // Chapter 4
+            tok::less,
+            tok::greater,
+            tok::lessequal,
+            tok::greaterequal,
+            tok::equalequal,
+            tok::exclaimequal,
+            tok::ampamp,
+            tok::pipepipe)) {
         BinaryOperator::BinaryOpKind Kind = parseBinOp(Tok);
         int precedence = binary_operators_precedence[Kind];
         if (precedence < min_precedence) break;
@@ -205,7 +237,7 @@ bool Parser::parseFactor(Expr *&E) {
         E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
         advance();
     }
-    else if (Tok.isOneOf(tok::minus, tok::tilde)) {
+    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim)) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
@@ -218,6 +250,8 @@ bool Parser::parseFactor(Expr *&E) {
             E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Negate, internalExpr);
         else if (OpKind == tok::tilde)
             E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Complement, internalExpr);
+        else if (OpKind == tok::exclaim)
+            E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Not, internalExpr);
     }
     else if (Tok.is(tok::l_paren)) {
         advance();
@@ -253,6 +287,22 @@ BinaryOperator::BinaryOpKind Parser::parseBinOp(Token& Tok) {
             return BinaryOperator::BinaryOpKind::BoK_BitwiseXor;
         case tok::pipe:
             return BinaryOperator::BinaryOpKind::BoK_BitwiseOr;
+        case tok::less:
+            return BinaryOperator::BinaryOpKind::BoK_LowerThan;
+        case tok::lessequal:
+            return BinaryOperator::BinaryOpKind::BoK_LowerEqual;
+        case tok::greater:
+            return BinaryOperator::BinaryOpKind::BoK_GreaterThan;
+        case tok::greaterequal:
+            return BinaryOperator::BinaryOpKind::BoK_GreaterEqual;
+        case tok::equalequal:
+            return BinaryOperator::BinaryOpKind::Bok_Equal;
+        case tok::exclaimequal:
+            return BinaryOperator::BinaryOpKind::Bok_NotEqual;
+        case tok::ampamp:
+            return BinaryOperator::BinaryOpKind::Bok_And;
+        case tok::pipepipe:
+            return BinaryOperator::BinaryOpKind::Bok_Or;
         default:
             return BinaryOperator::BinaryOpKind::BoK_None;
     }
