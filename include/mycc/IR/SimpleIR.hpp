@@ -4,9 +4,14 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <utility>
 #include <vector>
 #include <memory>
+#include <ranges>
 #include <string>
+#include <unordered_map>
+
+#include "SimpleIR.hpp"
 
 namespace mycc {
 namespace ir {
@@ -106,6 +111,58 @@ public:
     }
 };
 
+class Label : public Instruction {
+    std::string label_identifier;
+public:
+    explicit Label(std::string identifier) : label_identifier(std::move(identifier)) {}
+
+    [[nodiscard]] const std::string& get_identifier() const { return label_identifier; }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        return label_identifier;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return label_identifier;
+    }
+};
+
+class Copy : public Instruction {
+public:
+    explicit Copy(Value * src, Value *dst) {
+        addOperand(src);
+        addOperand(dst);
+    }
+
+    void setSrc(Value * src) {
+        assert(getNumOperands() >= 2 && "Num of operands must be at least 2");
+        setOperand(0, src);
+    }
+
+    void setDst(Value * dst) {
+        assert(getNumOperands() >= 2 && "Num of operands must be at least 2");
+        setOperand(1, dst);
+    }
+
+    [[nodiscard]] Value * getSrc() const {
+        assert(getNumOperands() >= 2 && "Num of operands must be at least 2");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] Value * getDst() const {
+        assert(getNumOperands() >= 2 && "Num of operands must be at least 2");
+        return getOperand(1);
+    }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        return "copy";
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "copy " + getDst()->to_string() + ", " + getSrc()->to_string();
+    }
+};
+
 class Mov : public Instruction {
 public:
     explicit Mov(Value * src, Value *dst) {
@@ -183,11 +240,102 @@ public:
     }
 };
 
+class Jump : public Instruction {
+    Label *destination;
+public:
+    explicit Jump(Label *dst) : destination(dst) {}
+
+    void setDst(Label *dst) {
+        destination = dst;
+    }
+
+    [[nodiscard]] Label * getDst() const {
+        return destination;
+    }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        return "jmp";
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "jmp " + getDst()->to_string();
+    }
+};
+
+class JumpIfZero : public Instruction {
+    Label *destination;
+public:
+    explicit JumpIfZero(Value *condition, Label *dst) : destination(dst) {
+        addOperand(condition);
+    }
+
+    void setCondition(Value *condition) {
+        assert(getNumOperands() >= 1 && "Num of operands must be at least 1");
+        setOperand(0, condition);
+    }
+
+    void setDst(Label *dst) {
+        destination = dst;
+    }
+
+    [[nodiscard]] Value * getCondition() const {
+        assert(getNumOperands() >= 1 && "No condition operand");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] Label * getDst() const {
+        return destination;
+    }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        return "jz";
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "jz " + getCondition()->to_string() + ", " + getDst()->to_string();
+    }
+};
+
+class JumpIfNotZero : public Instruction {
+    Label *destination;
+public:
+    explicit JumpIfNotZero(Value *condition, Label *dst) : destination(dst) {
+        addOperand(condition);
+    }
+
+    void setCondition(Value *condition) {
+        assert(getNumOperands() >= 1 && "Num of operands must be at least 1");
+        setOperand(0, condition);
+    }
+
+    void setDst(Label *dst) {
+        destination = dst;
+    }
+
+    [[nodiscard]] Value * getCondition() const {
+        assert(getNumOperands() >= 1 && "No condition operand");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] Label * getDst() const {
+        return destination;
+    }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        return "jnz";
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "jnz " + getCondition()->to_string() + ", " + getDst()->to_string();
+    }
+};
+
 class UnaryOp : public Instruction {
 public:
     enum UnaryOpKind {
         Neg,
-        Complement
+        Complement,
+        Not,
     };
 private:
     Reg * dst;
@@ -235,6 +383,8 @@ public:
             return "neg";
         if (Kind == Complement)
             return "complement";
+        if (Kind == Not)
+            return "not";
         return "";
     }
 
@@ -246,6 +396,7 @@ public:
 class BinaryOp : public Instruction {
 public:
     enum BinaryOpKind {
+        // Chapter 3
         Add,
         Sub,
         Mul,
@@ -256,6 +407,7 @@ public:
         Xor,
         Sal,
         Sar,
+        none,
     };
 private:
     Reg * dst;
@@ -343,6 +495,95 @@ public:
     }
 };
 
+class ICmpOp : public Instruction {
+public:
+    enum CmpOpKind {
+        lt,
+        le,
+        gt,
+        ge,
+        eq,
+        neq,
+        none,
+    };
+private:
+    Reg * Dst;
+    CmpOpKind Kind;
+public:
+    ICmpOp(Reg * Dst, Operand * left, Operand * right, CmpOpKind K) :
+        Dst(Dst), Kind(K) {
+        addOperand(left);
+        addOperand(right);
+    }
+
+    ICmpOp() = default;
+
+    void setDestination(Reg* reg) {
+        Dst = reg;
+    }
+
+    void setLeft(Operand * left) {
+        if (getNumOperands() == 0) {
+            addOperand(left);
+        } else {
+            setOperand(0, left);
+        }
+    }
+
+    void setRight(Operand * right) {
+        assert(getNumOperands() >= 1 && "There must be at least one operand provided before right operand.");
+        if (getNumOperands() == 1) {
+            addOperand(right);
+        } else {
+            setOperand(1, right);
+        }
+    }
+
+    void setKind(CmpOpKind K) {
+        Kind = K;
+    }
+
+    [[nodiscard]] Reg * getDestination() const {
+        return Dst;
+    }
+
+    [[nodiscard]] Value * getLeft() const {
+        assert(getNumOperands() > 0 && "No operands to retrieve.");
+        return getOperand(0);
+    }
+
+    [[nodiscard]] Value * getRight() const {
+        assert(getNumOperands() > 1 && "No operands to retrieve.");
+        return getOperand(1);
+    }
+
+    [[nodiscard]] CmpOpKind getKind() const { return Kind; }
+
+    [[nodiscard]] StringRef getOpcodeName() const override {
+        switch (Kind) {
+            case lt:
+                return "lt";
+            case le:
+                return "le";
+            case gt:
+                return "gt";
+            case ge:
+                return "ge";
+            case eq:
+                return "eq";
+            case neq:
+                return "neq";
+            default:
+                return "";
+        }
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return Dst->to_string() + " = icmp " + getOpcodeName().str() + " " +
+               getLeft()->to_string() + ", " + getRight()->to_string();
+    }
+};
+
 class Function {
     InstList Instructions;
     StringRef Name;
@@ -390,7 +631,11 @@ public:
     [[nodiscard]] std::string to_string() const {
         std::string result = "define " + get_name().str() + "() {\n";
         for (const Instruction* inst : Instructions) {
-            result += "  " + inst->to_string() + "\n";
+            if (const auto * label = dynamic_cast<const Label*>(inst)) {
+                result += label->to_string() + ":\n";
+            } else {
+                result += "  " + inst->to_string() + "\n";
+            }
         }
         result += "}\n";
         return result;
@@ -459,11 +704,12 @@ public:
     }
 };
 
-
 class Context {
+    std::unordered_map<std::int64_t, Int*> all_integer_values;
     std::vector<std::unique_ptr<Value>> Values;
     unsigned NextRegID = 0;
-    
+    unsigned LabelNextID = 0;
+
 public:
     Context() = default;
     ~Context() = default;
@@ -471,12 +717,48 @@ public:
     // Non-copyable, non-movable for simplicity
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
-    
+
+    Label* createNewLabel(std::string name) {
+        auto* label = new Label(std::move(name) + "_" + std::to_string(NextRegID++));
+        Values.emplace_back(label);
+        return label;
+    }
+
+    Jump* createJump(Label * label) {
+        auto* jump = new Jump(label);
+        Values.emplace_back(jump);
+        return jump;
+    }
+
+    JumpIfZero* createJZ(Value* cond, Label * label) {
+        auto *jz = new JumpIfZero(cond, label);
+        Values.emplace_back(jz);
+        return jz;
+    }
+
+    JumpIfNotZero* createJNZ(Value* cond, Label * label) {
+        auto *jnz = new JumpIfNotZero(cond, label);
+        Values.emplace_back(jnz);
+        return jnz;
+    }
+
     // Factory methods for creating Values
     Int* createInt(llvm::APSInt Value) {
+        const std::int64_t s_ext = Value.getSExtValue();
+        if (all_integer_values.contains(s_ext))
+            return all_integer_values[s_ext];
         auto* IntVal = new Int(std::move(Value));
         Values.emplace_back(IntVal);
+        all_integer_values[s_ext] = IntVal;
         return IntVal;
+    }
+
+    std::vector<Int*> getAllIntegerConstants() const {
+        std::vector<Int*> result;
+        for (const auto &[Keys, Value] : all_integer_values) {
+            result.emplace_back(Value);
+        }
+        return result;
     }
     
     Reg* createReg() {
@@ -484,7 +766,13 @@ public:
         Values.emplace_back(RegVal);
         return RegVal;
     }
-    
+
+    Copy* createCopy(Value* src, Value* dst) {
+        auto* copy = new Copy(src, dst);
+        Values.emplace_back(copy);
+        return copy;
+    }
+
     Mov* createMov(Value* src, Value* dst) {
         auto* MovInst = new Mov(src, dst);
         Values.emplace_back(MovInst);
@@ -509,6 +797,13 @@ public:
         auto* BinaryInst = new BinaryOp(dst, left, right, kind);
         Values.emplace_back(BinaryInst);
         return BinaryInst;
+    }
+
+    ICmpOp* createICmpOp(Operand* left, Operand* right, ICmpOp::CmpOpKind kind) {
+        Reg* dst = createReg();
+        auto* cmp = new ICmpOp(dst, left, right, kind);
+        Values.emplace_back(cmp);
+        return cmp;
     }
 
     // All Values are automatically cleaned up when Context is destroyed
