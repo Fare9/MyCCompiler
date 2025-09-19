@@ -116,7 +116,7 @@ class Label : public Instruction {
 public:
     explicit Label(std::string identifier) : label_identifier(std::move(identifier)) {}
 
-    [[nodiscard]] std::string get_identifier() const { return label_identifier; }
+    [[nodiscard]] const std::string& get_identifier() const { return label_identifier; }
 
     [[nodiscard]] StringRef getOpcodeName() const override {
         return label_identifier;

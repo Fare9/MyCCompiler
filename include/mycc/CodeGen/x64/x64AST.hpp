@@ -9,9 +9,21 @@
 #include <unordered_map>
 #include <sstream>
 
+#include "x64AST.hpp"
+#include "x64AST.hpp"
+
 namespace mycc {
 namespace codegen {
 namespace x64 {
+
+enum class X64ConditionTypeE {
+    E,  // Equal
+    NE, // NotEqual
+    G,  // Greater
+    GE, // GreaterEqual
+    L,  // Lower
+    LE, // LowerEqual
+};
 
 class X64Program;
 class X64Function;
@@ -233,6 +245,26 @@ public:
     virtual std::string to_string() const = 0;
 };
 
+class X64Label : public X64Instruction {
+    StringRef Name;
+public:
+    X64Label() = default;
+
+    explicit X64Label(StringRef Name) : Name(Name) {}
+
+    [[nodiscard]] StringRef getName() const {
+        return Name;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        std::string prefix;
+#ifdef __linux__
+        prefix = ".L";
+#endif
+        return prefix + Name.str();
+    }
+};
+
 class X64Mov : public X64Instruction {
     X64Operand * Src{};
     X64Operand * Dst{};
@@ -272,11 +304,152 @@ public:
     }
 };
 
+class X64Cmp : public X64Instruction {
+    X64Operand * Left{};
+    X64Operand * Right{};
+public:
+    X64Cmp() = default;
+
+    X64Cmp(X64Operand * Left, X64Operand * Right)
+        : Left(Left), Right(Right) {
+    }
+
+    [[nodiscard]] X64Operand * getLeft() const {
+        return Left;
+    }
+
+    [[nodiscard]] X64Operand * getRight() const {
+        return Right;
+    }
+
+    void setLeft(X64Operand * L) {
+        Left = L;
+    }
+
+    void setRight(X64Operand * R) {
+        Right = R;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "cmp " + Left->to_string() + ", " + Right->to_string();
+    }
+};
+
+class X64Jmp : public X64Instruction {
+    X64Label * Target{};
+public:
+    X64Jmp() = default;
+
+    X64Jmp(X64Label * Target) : Target(Target) {}
+
+    [[nodiscard]] X64Label * getTarget() const {
+        return Target;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "jmp " + Target->to_string();
+    }
+};
+
+class X64JmpCC : public X64Instruction {
+    X64ConditionTypeE Condition;
+    X64Label * Target;
+public:
+    X64JmpCC() = default;
+
+    X64JmpCC(X64ConditionTypeE Condition, X64Label * Target)
+        : Condition(Condition), Target(Target) {}
+
+    [[nodiscard]] X64ConditionTypeE getCondition() const {
+        return Condition;
+    }
+
+    [[nodiscard]] X64Label * getTarget() const {
+        return Target;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        std::string ins;
+
+        switch (Condition) {
+            case X64ConditionTypeE::E:
+                ins = "je";
+                break;
+            case X64ConditionTypeE::NE:
+                ins = "jne";
+                break;
+            case X64ConditionTypeE::G:
+                ins = "jg";
+                break;
+            case X64ConditionTypeE::GE:
+                ins = "jge";
+                break;
+            case X64ConditionTypeE::L:
+                ins = "jl";
+                break;
+            case X64ConditionTypeE::LE:
+                ins = "jle";
+                break;
+        }
+        return ins + " " + Target->to_string();
+    }
+
+};
+
+class X64SetCC : public X64Instruction {
+    X64ConditionTypeE Condition;
+    X64Operand * Op;
+public:
+    X64SetCC() = default;
+
+    X64SetCC(X64ConditionTypeE Condition, X64Operand * Op)
+        : Condition(Condition), Op(Op) {}
+
+    [[nodiscard]] X64Operand * getOperand() const {
+        return Op;
+    }
+
+    [[nodiscard]] X64ConditionTypeE getCondition() const {
+        return Condition;
+    }
+
+    void setOperand(X64Operand * O) {
+        Op = O;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        std::string ins;
+
+        switch (Condition) {
+            case X64ConditionTypeE::E:
+                ins = "sete";
+                break;
+            case X64ConditionTypeE::NE:
+                ins = "setne";
+                break;
+            case X64ConditionTypeE::G:
+                ins = "setg";
+                break;
+            case X64ConditionTypeE::GE:
+                ins = "setge";
+                break;
+            case X64ConditionTypeE::L:
+                ins = "setl";
+                break;
+            case X64ConditionTypeE::LE:
+                ins = "setle";
+                break;
+        }
+        return ins + " " + Op->to_string();
+    }
+};
+
 class X64Unary : public X64Instruction {
 public:
     enum X64UnaryKind {
         Neg,
-        Complement
+        Complement,
+        None
     };
 private:
     X64UnaryKind Kind;
@@ -333,7 +506,8 @@ public:
         Or,
         Xor,
         Sal,
-        Sar
+        Sar,
+        None
     };
 private:
     X64BinaryKind Kind;
@@ -405,7 +579,6 @@ public:
 };
 
 class X64IDiv : public X64Instruction {
-private:
     X64Operand * Op;
 public:
     X64IDiv() = default;
@@ -477,10 +650,11 @@ public:
 };
 
 class X64Context {
-private:
     // Memory management - owns all operands and instructions
     std::vector<std::unique_ptr<X64Operand>> Operands;
     std::vector<std::unique_ptr<X64Instruction>> Instructions;
+
+    std::unordered_map<std::string, X64Label*> existingLabels;
     
     // Register management
     std::unordered_map<unsigned, PseudoRegister*> PseudoRegs;           // ID -> PseudoReg
@@ -531,7 +705,7 @@ public:
         Operands.emplace_back(intVal);
         return intVal;
     }
-    
+
     X64Stack* createStack(llvm::APSInt offset, X64Register* baseReg, X64Stack::Size size = X64Stack::QWORD) {
         auto* stackVal = new X64Stack(std::move(offset), baseReg, size);
         Operands.emplace_back(stackVal);
@@ -618,6 +792,40 @@ public:
     }
     
     // Factory methods for instructions
+    X64Label* getOrCreateLabel(StringRef Name) {
+        std::string NameStr{Name.str()};
+        if (existingLabels.contains(NameStr))
+            return existingLabels[NameStr];
+        auto* label = new X64Label(Name);
+        Instructions.emplace_back(label);
+        existingLabels[NameStr] = label;
+        return label;
+    }
+
+    X64Cmp* createCmp(X64Operand* Left, X64Operand* Right) {
+        auto* cmp = new X64Cmp(Left, Right);
+        Instructions.emplace_back(cmp);
+        return cmp;
+    }
+
+    X64Jmp* createJmp(X64Label * Label) {
+        auto* jmp = new X64Jmp(Label);
+        Instructions.emplace_back(jmp);
+        return jmp;
+    }
+
+    X64JmpCC* createJCC(X64ConditionTypeE Condition, X64Label * Label) {
+        auto* jmp = new X64JmpCC(Condition, Label);
+        Instructions.emplace_back(jmp);
+        return jmp;
+    }
+
+    X64SetCC* createSetCC(X64ConditionTypeE Condition, X64Operand* Op) {
+        auto* set = new X64SetCC(Condition, Op);
+        Instructions.emplace_back(set);
+        return set;
+    }
+
     X64Mov* createMov(X64Operand* src, X64Operand* dst) {
         auto* inst = new X64Mov(src, dst);
         Instructions.emplace_back(inst);
@@ -694,6 +902,17 @@ public:
 
     void add_instruction(X64Instruction * I) {
         Instrs.push_back(I);
+    }
+
+    void add_instructions(X64Instruction * I, X64Instruction* I2) {
+        Instrs.push_back(I);
+        Instrs.push_back(I2);
+    }
+
+    template<typename... Ts>
+    void add_instructions(X64Instruction * I, X64Instruction* I2, Ts... Is) {
+        Instrs.push_back(I);
+        add_instructions(I2, Is...);
     }
     
     X64Instructions& getInstructions() {

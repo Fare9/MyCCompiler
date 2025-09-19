@@ -1,4 +1,7 @@
 #include "mycc/CodeGen/x64/X64CodeGen.hpp"
+
+#include <set>
+
 #include "mycc/IR/SimpleIR.hpp"
 #include "mycc/CodeGen/x64/x64AST.hpp"
 
@@ -52,6 +55,8 @@ void X64CodeGenerator::generateFunction(const ir::Function& IRFunc, X64Function*
 void X64CodeGenerator::generateInstruction(const ir::Instruction& Inst, X64Function* X64Func) {
     if (const auto * mov = dynamic_cast<const ir::Mov*>(&Inst)) {
         generateMov(*mov, X64Func);
+    } else if (const auto * copy = dynamic_cast<const ir::Copy*>(&Inst)) {
+        generateCopy(*copy, X64Func);
     } else if (const auto * ret = dynamic_cast<const ir::Ret*>(&Inst)) {
         generateRet(*ret, X64Func);
     } else if (const auto * unary = dynamic_cast<const ir::UnaryOp*>(&Inst)) {
@@ -74,14 +79,123 @@ void X64CodeGenerator::generateInstruction(const ir::Instruction& Inst, X64Funct
             case ir::BinaryOp::Rem:
                 generateRem(*binary, X64Func);
                 break;
+            case ir::BinaryOp::none:
+                break;
         }
+    } else if (const auto * label = dynamic_cast<const ir::Label*>(&Inst)) {
+        generateLabel(*label, X64Func);
+    } else if (const auto * Jump = dynamic_cast<const ir::Jump*>(&Inst)) {
+        generateJump(*Jump, X64Func);
+    } else if (const auto * JNZ = dynamic_cast<const ir::JumpIfNotZero*>(&Inst)) {
+        generateJumpIfNotZero(*JNZ, X64Func);
+    } else if (const auto * JZ = dynamic_cast<const ir::JumpIfZero*>(&Inst)) {
+        generateJumpIfZero(*JZ, X64Func);
+    } else if (const auto * Comp = dynamic_cast<const ir::ICmpOp*>(&Inst)) {
+        generateComp(*Comp, X64Func);
     }
+}
+
+void X64CodeGenerator::generateLabel(const ir::Label& LabelInst, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    auto* X64Label = Ctx.getOrCreateLabel(LabelInst.get_identifier());
+    X64Func->add_instruction(X64Label);
+}
+
+void X64CodeGenerator::generateJump(const ir::Jump& JumpInst, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    // Simply generate/retrieve label where to jump, and add the jump instruction
+    // the label is not added to the instruction list yet, it will be added
+    // once it is found in the code.
+    auto* X64Label = Ctx.getOrCreateLabel(JumpInst.getDst()->get_identifier());
+    auto* X64Jump = Ctx.createJmp(X64Label);
+    X64Func->add_instruction(X64Jump);
+}
+
+void X64CodeGenerator::generateJumpIfNotZero(const ir::JumpIfNotZero& JumpIfNZInstr, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    // Generate/Retrieve label where to jump
+    auto* X64Label = Ctx.getOrCreateLabel(JumpIfNZInstr.getDst()->get_identifier());
+    // Take and generate the condition, as well as a zero value to compare with
+    auto* condition = convertOperand(JumpIfNZInstr.getCondition(), Ctx);
+    X64Int* zeroValue = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 0)));
+    auto* Cmp = Ctx.createCmp(condition, zeroValue);
+    X64Func->add_instruction(Cmp);
+    // generate a conditional jump of if not equal
+    auto* X64JNZ = Ctx.createJCC(X64ConditionTypeE::NE, X64Label);
+    X64Func->add_instruction(X64JNZ);
+}
+
+void X64CodeGenerator::generateJumpIfZero(const ir::JumpIfZero& JumpIfZInstr, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    // Generate/Retrieve label where to jump
+    auto* X64Label = Ctx.getOrCreateLabel(JumpIfZInstr.getDst()->get_identifier());
+    // Take and generate the condition, as well as a zero value to compare with
+    auto* condition = convertOperand(JumpIfZInstr.getCondition(), Ctx);
+    X64Int* zeroValue = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 0)));
+    auto* Cmp = Ctx.createCmp(condition, zeroValue);
+    X64Func->add_instruction(Cmp);
+    // generate a conditional jump of if not equal
+    auto* X64JZ = Ctx.createJCC(X64ConditionTypeE::E, X64Label);
+    X64Func->add_instruction(X64JZ);
+}
+
+void X64CodeGenerator::generateComp(const ir::ICmpOp& CompInstr, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    // Get the operands for the comparison and the destination where
+    // the comparison will be stored
+    X64Operand * Left = convertOperand(CompInstr.getLeft(), Ctx);
+    X64Operand * Right = convertOperand(CompInstr.getRight(), Ctx);
+    X64Operand * Dst = convertOperand(CompInstr.getDestination(), Ctx);
+    // Because we will use setXX to set the value of the register
+    // we need to zero the register, so we use a `MOV` instruction
+    // with zero, to set the whole value of the register.
+    X64Int* zeroValue = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 0)));
+    X64ConditionTypeE condition_type_e{};
+    switch (CompInstr.getKind()) {
+        case ir::ICmpOp::lt:
+            condition_type_e = X64ConditionTypeE::L;
+            break;
+        case ir::ICmpOp::le:
+            condition_type_e = X64ConditionTypeE::LE;
+            break;
+        case ir::ICmpOp::gt:
+            condition_type_e = X64ConditionTypeE::G;
+            break;
+        case ir::ICmpOp::ge:
+            condition_type_e = X64ConditionTypeE::GE;
+            break;
+        case ir::ICmpOp::eq:
+            condition_type_e = X64ConditionTypeE::E;
+            break;
+        case ir::ICmpOp::neq:
+            condition_type_e = X64ConditionTypeE::NE;
+            break;
+        case ir::ICmpOp::none:
+            break;
+    }
+    // comparison between values
+    auto* Comp = Ctx.createCmp(Left, Right);
+    X64Func->add_instruction(Comp);
+    // initialization of destination register
+    auto* Mov = Ctx.createMov(zeroValue, Dst);
+    X64Func->add_instruction(Mov);
+    // set the approppriate RFLAG
+    auto* SetCC = Ctx.createSetCC(condition_type_e, Dst);
+    X64Func->add_instruction(SetCC);
 }
 
 void X64CodeGenerator::generateMov(const ir::Mov& MovInst, X64Function* X64Func) {
     auto & Ctx = X64Func->getContext();
     X64Operand * Src = convertOperand(MovInst.getSrc(), Ctx);
     X64Operand * Dst = convertOperand(MovInst.getDst(), Ctx);
+    auto Mov = Ctx.createMov(Src, Dst);
+    X64Func->add_instruction(Mov);
+}
+
+void X64CodeGenerator::generateCopy(const ir::Copy& CopyInstr, X64Function* X64Func) {
+    auto & Ctx = X64Func->getContext();
+    X64Operand * Src = convertOperand(CopyInstr.getSrc(), Ctx);
+    X64Operand * Dst = convertOperand(CopyInstr.getDst(), Ctx);
     auto Mov = Ctx.createMov(Src, Dst);
     X64Func->add_instruction(Mov);
 }
@@ -101,7 +215,7 @@ void X64CodeGenerator::generateUnary(const ir::UnaryOp& UnaryInst, X64Function* 
     auto &Ctx = X64Func->getContext();
     X64Operand * tempRegister = convertOperand(UnaryInst.getDestination(), Ctx);
     X64Operand * operand = convertOperand(UnaryInst.getSource(), Ctx);
-    X64Unary::X64UnaryKind Kind;
+    X64Unary::X64UnaryKind Kind = X64Unary::None;
     switch (UnaryInst.getKind()) {
         case ir::UnaryOp::UnaryOpKind::Neg:
             Kind = X64Unary::X64UnaryKind::Neg;
@@ -109,6 +223,17 @@ void X64CodeGenerator::generateUnary(const ir::UnaryOp& UnaryInst, X64Function* 
         case ir::UnaryOp::UnaryOpKind::Complement:
             Kind = X64Unary::X64UnaryKind::Complement;
             break;
+        case ir::UnaryOp::UnaryOpKind::Not:
+            // not instruction from SimpleIR does not
+            // generate a Unary instruction like we had before
+            // it generates a comparison with zero
+            // !x is equals to x == 0
+            X64Int* zeroValue = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 0)));
+            X64Instruction* compInstruction = Ctx.createCmp(operand, zeroValue);
+            X64Instruction* initDst = Ctx.createMov(zeroValue, tempRegister);
+            X64Instruction* setCC = Ctx.createSetCC(X64ConditionTypeE::E, tempRegister);
+            X64Func->add_instructions(compInstruction, initDst, setCC);
+            return;
     }
     // First a Move from Operand to TempRegister
     X64Func->add_instruction(Ctx.createMov(operand, tempRegister));
@@ -258,6 +383,18 @@ void X64CodeGenerator::replacePseudoRegistersInInstruction(X64Instruction* Inst,
             div->setOperand(stackSlot);
         }
     }
+    else if (auto * cmp = dynamic_cast<X64Cmp*>(Inst)) {
+        X64Operand * left = cmp->getLeft();
+        if (auto * pseudoReg = dynamic_cast<PseudoRegister*>(left)) {
+            X64Operand* stackSlot = getOrAllocateStackSlot(pseudoReg->getID(), Ctx);
+            cmp->setLeft(stackSlot);
+        }
+        X64Operand * right = cmp->getRight();
+        if (auto * pseudoReg = dynamic_cast<PseudoRegister*>(right)) {
+            X64Operand* stackSlot = getOrAllocateStackSlot(pseudoReg->getID(), Ctx);
+            cmp->setRight(stackSlot);
+        }
+    }
     // X64Ret has no operands to replace
 }
 
@@ -266,7 +403,7 @@ X64Operand* X64CodeGenerator::getOrAllocateStackSlot(unsigned pseudoID, X64Conte
     if (Ctx.isAllocatedToMemory(pseudoID)) {
         return Ctx.getAllocatedMemory(pseudoID);
     }
-    
+
     // Allocate new stack slot
     Ctx.allocateMemory(pseudoID, X64Stack::DWORD);
     return Ctx.getAllocatedMemory(pseudoID);
@@ -300,7 +437,8 @@ void X64CodeGenerator::fixupInstructionsForFunction(X64Function* Func) {
             // If both source and destination are memory, we need to fix this
             if (srcStack != nullptr && dstStack != nullptr) {
                 // Use R10D as intermediate register
-                auto *R10D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+                auto *R10D =
+                    Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
                 
                 // Create two new instructions:
                 // 1. MOV R10D, [src_memory]
@@ -323,8 +461,10 @@ void X64CodeGenerator::fixupInstructionsForFunction(X64Function* Func) {
             // If both source and destination are memory, we need to fix this
             if (srcStack != nullptr && dstStack != nullptr) {
                 // Use R10D as intermediate register
-                auto *R10D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
-                auto *CL = Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::BYTE);
+                auto *R10D =
+                    Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+                auto *CL =
+                    Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::BYTE);
                 PhysicalRegister * srcRegister;
                 // Create two new instructions:
                 // 1. MOV R10D, [src_memory]
@@ -395,6 +535,52 @@ void X64CodeGenerator::fixupInstructionsForFunction(X64Function* Func) {
                 replacements.emplace_back(div, std::move(newInstructions));
             }
         }
+        else if (auto * cmp = dynamic_cast<X64Cmp*>(Inst)) {
+            X64Operand* left = cmp->getLeft();
+            X64Operand* right = cmp->getRight();
+            auto *leftStack = dynamic_cast<X64Stack*>(left);
+            auto *leftImm = dynamic_cast<X64Int*>(left);
+            auto *rightStack = dynamic_cast<X64Stack*>(right);
+
+            // in a CMP instruction both operands cannot be stack operators
+            if (leftStack != nullptr && rightStack != nullptr) {
+                // Use R10D as intermediate register
+                auto *R10D =
+                    Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+                std::vector<X64Instruction*> newInstructions;
+                newInstructions.push_back(Ctx.createMov(leftStack, R10D));
+                newInstructions.push_back(Ctx.createCmp(R10D, rightStack));
+
+                replacements.emplace_back(cmp, std::move(newInstructions));
+            }
+            // in a CMP instruction, the left side cannot be a number, because
+            // the result of the operation should be stored there, even if CMP
+            // does not store anything, same rule applies
+            else if (leftImm != nullptr) {
+                // Use R11D as immediate register
+                auto *R11D =
+                    Ctx.getPhysReg(PhysicalRegister::PhysReg::R11, PhysicalRegister::Size::DWORD);
+                std::vector<X64Instruction*> newInstructions;
+                newInstructions.push_back(Ctx.createMov(leftImm, R11D));
+                newInstructions.push_back(Ctx.createCmp(R11D, right));
+
+                replacements.emplace_back(cmp, std::move(newInstructions));
+            }
+        } else if (auto * setCC = dynamic_cast<X64SetCC*>(Inst)) {
+            auto it = std::ranges::find_if(Func->getInstructions(), [&](X64Instruction * I) {
+                return I == setCC;
+            });
+            auto * prevMov = dynamic_cast<X64Mov*>(*(--it));
+            auto * movOperator = prevMov->getDst();
+            if (auto * mem = dynamic_cast<X64Stack*>(movOperator)) {
+                auto * byteMem = Ctx.getAllocatedStack(mem, X64Stack::Size::BYTE);
+                setCC->setOperand(byteMem);
+            }
+            else if (auto * reg = dynamic_cast<PhysicalRegister*>(movOperator)) {
+                auto * byteReg = Ctx.getPhysReg(reg->getReg(), PhysicalRegister::Size::BYTE);
+                setCC->setOperand(byteReg);
+            }
+        }
     }
     
     // Apply the replacements
@@ -422,7 +608,6 @@ void X64CodeGenerator::replaceInstructionInFunction(X64Function* Func, X64Instru
         }
     }
 }
-
 
 void X64CodeGenerator::insertAllocationInstruction(X64Function* Func) {
     auto& Ctx = Func->getContext();
@@ -477,7 +662,11 @@ std::string X64CodeGenerator::emitFunction(const X64Function& Func) {
             contains_ret = true;
         }
 
-        func_output << "    " << emitInstruction(*Inst) << "\n";
+        if (dynamic_cast<X64Label*>(Inst)) {
+            func_output << emitInstruction(*Inst) << ":" << "\n";
+        } else {
+            func_output << "    " << emitInstruction(*Inst) << "\n";
+        }
     }
 
     if (!contains_ret) {

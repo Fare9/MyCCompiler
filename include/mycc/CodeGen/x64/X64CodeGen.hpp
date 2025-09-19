@@ -29,7 +29,15 @@ private:
     void generateInstruction(const ir::Instruction& Inst, X64Function* X64Func);
     
     // Instruction generation methods
+    void generateLabel(const ir::Label& LabelInst, X64Function* X64Func);
+    void generateJump(const ir::Jump& JumpInst, X64Function* X64Func);
+    void generateJumpIfNotZero(const ir::JumpIfNotZero& JumpIfNZInstr, X64Function* X64Func);
+    void generateJumpIfZero(const ir::JumpIfZero& JumpIfZInstr, X64Function* X64Func);
+
+    void generateComp(const ir::ICmpOp& CompInstr, X64Function* X64Func);
+
     void generateMov(const ir::Mov& MovInst, X64Function* X64Func);
+    void generateCopy(const ir::Copy& CopyInstr, X64Function* X64Func);
     void generateRet(const ir::Ret& RetInst, X64Function* X64Func);
     void generateUnary(const ir::UnaryOp& UnaryInst, X64Function* X64Func);
     void generateBinary(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
