@@ -93,11 +93,12 @@ class Parser {
     bool parseProgram(Program *&P);
     bool parseFunction(Function *&F);
 
-    bool parseStatementSequence(StmtList &Stmts);
-    bool parseStatement(StmtList &Stmts);
-    bool parseReturnStmt(StmtList &Stmts);
+    bool parseBlock(BlockItems& Items);
+    bool parseDeclaration(BlockItems& Items);
+    bool parseStatement(BlockItems& Items);
+    bool parseReturnStmt(BlockItems& Items);
+    bool parseExprStmt(BlockItems& Items);
 
-    bool parseExprList(ExprList &Exprs);
     bool parseExpr(Expr *&E, int min_precedence = 0);
     bool parseFactor(Expr *&E);
 

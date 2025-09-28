@@ -18,8 +18,11 @@ ir::Function* IRGenerator::generateFunction(const Function& ASTFunc) {
     auto* IRFunc = new ir::Function(instructions, ASTFunc.getName());
     
     // Generate IR for each statement in the function
-    for (const Statement* Stmt : ASTFunc) {
-        generateStatement(*Stmt, IRFunc);
+    for (const BlockItem Item : ASTFunc) {
+        if (std::holds_alternative<Statement*>(Item)) {
+            Statement* Stmt = std::get<Statement*>(Item);
+            generateStatement(*Stmt, IRFunc);
+        }
     }
     
     return IRFunc;

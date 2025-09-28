@@ -16,11 +16,18 @@ public:
 
     Program * actOnProgramDeclaration(FuncList &Funcs);
     Function * actOnFunctionDeclaration(SMLoc Loc, StringRef Name);
-    void actOnFunctionDeclaration(Function *F, SMLoc Loc, StringRef Name, StmtList &Stmts);
+    void actOnFunctionDeclaration(Function *F, SMLoc Loc, StringRef Name, BlockItems& Items);
 
-    void actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal);
-    Expr* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
-    Expr* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr);
-    Expr* actOnBinaryOperator(SMLoc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right);
+    void actOnVarDeclaration(BlockItems& Items, SMLoc Loc, Var* Name, Expr* assignment);
+
+    void actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal);
+    void actOnNullStatement(BlockItems& Items, SMLoc Loc);
+    void actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr);
+
+    IntegerLiteral* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
+    UnaryOperator* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr);
+    BinaryOperator* actOnBinaryOperator(SMLoc, BinaryOperator::BinaryOpKind Kind, Expr* left, Expr* right);
+    AssignmentOperator* actOnAssignment(SMLoc, Expr* left, Expr* right);
+    Var* actOnIdentifier(SMLoc, StringRef Name);
 };
 }
