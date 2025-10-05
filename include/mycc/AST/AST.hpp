@@ -144,7 +144,7 @@ public:
 
 class Var : public Expr {
     SMLoc Loc;
-    StringRef Name;
+    std::string Name;
 public:
     Var(SMLoc Loc, StringRef Name) : Expr(Ek_Var), Loc(Loc), Name(Name) {
     }
@@ -153,6 +153,10 @@ public:
 
     [[nodiscard]] StringRef getName() const {
         return Name;
+    }
+
+    void setName() const {
+
     }
 
     static bool classof(const Expr *E) {
@@ -305,7 +309,7 @@ public:
             delete expr;
     }
 
-    [[nodiscard]] Var * getName() const
+    [[nodiscard]] Var * getVar() const
     {
         return Name;
     }
@@ -313,6 +317,10 @@ public:
     Expr * getExpr() const
     {
         return expr;
+    }
+
+    void setExpr(Expr * e) {
+        expr = e;
     }
 };
 

@@ -1,24 +1,50 @@
 #pragma once
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/Sema/Scope.hpp"
 #include "mycc/Basic/Diagnostic.hpp"
+#include "llvm/ADT/StringMap.h"
+#include <vector>
+#include <string>
 
 namespace mycc {
 class Sema {
+    friend class EnterDeclScope;
+
     DiagnosticsEngine &Diags;
+    Scope *CurrentScope;
+    bool avoid_errors = false;
+
+    // Variable name mapping: original_name -> stack of unique_names
+    StringMap<std::vector<std::string>> VariableNameStacks;
+
+    // Counter for generating unique variable names
+    unsigned int VariableCounter;
+
+    // Helper methods for variable name management
+    std::string generateUniqueVarName(StringRef originalName);
+    void pushVariableName(StringRef originalName, const std::string& uniqueName);
+    std::string getCurrentUniqueVarName(StringRef originalName);
+    void popVariablesFromScope(const std::vector<std::string>& declaredVars);
 
 public:
     explicit Sema(DiagnosticsEngine &Diags) : Diags(Diags) {
         initialize();
     }
 
+    void avoidErrors() {
+        avoid_errors = true;
+    }
+
     void initialize();
+
+    void enterScope();
+    void exitScope();
 
     Program * actOnProgramDeclaration(FuncList &Funcs);
     Function * actOnFunctionDeclaration(SMLoc Loc, StringRef Name);
-    void actOnFunctionDeclaration(Function *F, SMLoc Loc, StringRef Name, BlockItems& Items);
 
-    void actOnVarDeclaration(BlockItems& Items, SMLoc Loc, Var* Name, Expr* assignment);
+    bool actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name);
 
     void actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal);
     void actOnNullStatement(BlockItems& Items, SMLoc Loc);
@@ -29,5 +55,17 @@ public:
     BinaryOperator* actOnBinaryOperator(SMLoc, BinaryOperator::BinaryOpKind Kind, Expr* left, Expr* right);
     AssignmentOperator* actOnAssignment(SMLoc, Expr* left, Expr* right);
     Var* actOnIdentifier(SMLoc, StringRef Name);
+};
+
+class EnterDeclScope {
+    Sema &Semantics;
+public:
+    EnterDeclScope(Sema &Semantics) : Semantics(Semantics) {
+        Semantics.enterScope();
+    }
+
+    ~EnterDeclScope() {
+        Semantics.exitScope();
+    }
 };
 }

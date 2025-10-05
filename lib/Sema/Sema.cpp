@@ -1,9 +1,31 @@
 
 #include "mycc/Sema/Sema.hpp"
+#include <cassert>
 
 using namespace mycc;
 
+void Sema::enterScope()
+{
+    CurrentScope = new Scope(CurrentScope);
+}
+
+void Sema::exitScope()
+{
+    // check first there's a current scope
+    assert(CurrentScope && "Can't exit non-existing scope");
+
+    // Pop variables that were declared in this scope
+    popVariablesFromScope(CurrentScope->getDeclaredVariables());
+
+    Scope *Parent = CurrentScope->getParentScope();
+    // delete current scope
+    delete CurrentScope;
+    CurrentScope = Parent;
+}
+
 void Sema::initialize() {
+    CurrentScope = nullptr;
+    VariableCounter = 0;
 }
 
 Program * Sema::actOnProgramDeclaration(FuncList &Funcs) {
@@ -13,15 +35,35 @@ Program * Sema::actOnProgramDeclaration(FuncList &Funcs) {
 }
 
 Function * Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
-    return new Function(Name, Loc);
+    auto* func = new Function(Name, Loc);
+
+    return func;
 }
 
-void Sema::actOnFunctionDeclaration(Function *F, SMLoc Loc, StringRef Name, BlockItems& Items) {
-    F->setBody(Items);
-}
+bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
+    // Generate unique name and track it
+    StringRef originalName = Name;
+    std::string uniqueName = generateUniqueVarName(originalName);
+    pushVariableName(originalName, uniqueName);
 
-void Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, Var* Name, Expr* assignment) {
-    Items.push_back(new Declaration(Loc, Name, assignment));
+    // Create declaration with unique name
+    auto* decl = new Declaration(Loc, new Var(Loc, uniqueName));
+
+    // Add to current scope if it exists, using original name as key
+    if (CurrentScope) {
+        if (!CurrentScope->insert(originalName, decl)) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_duplicate_variable_declaration, originalName.str());
+                return true;
+            }
+        }
+
+        // Track that this variable was declared in the current scope
+        CurrentScope->addDeclaredVariable(originalName);
+    }
+
+    Items.push_back(decl);
+    return false;
 }
 
 void Sema::actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal) {
@@ -52,9 +94,58 @@ BinaryOperator* Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKin
 }
 
 AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
+    if (!avoid_errors) {
+        if (left->getKind() != Expr::Ek_Var) {
+            Diags.report(Loc, diag::err_incorrect_lvalue);
+            return nullptr;
+        }
+    }
+
     return new AssignmentOperator(Loc, left, right);
 }
 
 Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
+    // Look up the variable in current scope
+    if (CurrentScope) {
+        Declaration* decl = CurrentScope->lookup(Name);
+        if (!decl) {
+            if (!avoid_errors) {
+                // Issue error for potentially undefined variable
+                Diags.report(Loc, diag::err_var_used_before_declared, Name.str());
+                return nullptr;
+            }
+        }
+        else {
+            // Variable exists, get the unique name for it
+            std::string uniqueName = getCurrentUniqueVarName(Name);
+            return new Var(Loc, uniqueName);
+        }
+    }
+
     return new Var(Loc, Name);
+}
+
+std::string Sema::generateUniqueVarName(StringRef originalName) {
+    return originalName.str() + "_" + std::to_string(VariableCounter++);
+}
+
+void Sema::pushVariableName(StringRef originalName, const std::string& uniqueName) {
+    VariableNameStacks[originalName].push_back(uniqueName);
+}
+
+std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
+    auto it = VariableNameStacks.find(originalName);
+    if (it != VariableNameStacks.end() && !it->second.empty()) {
+        return it->second.back();
+    }
+    return originalName.str();
+}
+
+void Sema::popVariablesFromScope(const std::vector<std::string>& declaredVars) {
+    for (const std::string& varName : declaredVars) {
+        auto it = VariableNameStacks.find(varName);
+        if (it != VariableNameStacks.end() && !it->second.empty()) {
+            it->second.pop_back();
+        }
+    }
 }

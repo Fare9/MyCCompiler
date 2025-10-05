@@ -23,6 +23,7 @@
 
 bool lexer = false;
 bool parser = false;
+bool semantic = false;
 bool tacky = false;
 bool codegen = false;
 bool compile = false;
@@ -39,6 +40,7 @@ void print_help() {
               << "\nOptions:\n"
               << "  --lex      Run lexer only\n"
               << "  --parse    Run lexer and parser\n"
+              << "  --validate Run semantic analysis on top of parser\n"
               << "  --tacky    Run lexer, parser and generate IR\n"
               << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
               << "  --help     Show this help message\n"
@@ -54,6 +56,10 @@ int main(int argc, char **argv) {
             {"--lex",     [&]() { lexer = true; }},
             {"--parse",   [&]() {
                 parser = true;
+            }},
+            {"--validate", [&](){
+                parser = true;
+                semantic = true;
             }},
             {"--tacky", [&]() {
                 tacky = true;
@@ -115,6 +121,10 @@ int main(int argc, char **argv) {
             Lexer.reset();
         }
         if (parser) {
+            // if --validate is provided, parser is
+            // run with semantic analysis with errors
+            if (!semantic)
+                Sema.avoidErrors();
             auto p = Parser.parse();
             Lexer.reset();
             if (!p) {

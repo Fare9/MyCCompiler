@@ -62,9 +62,11 @@ bool Parser::parseFunction(Function *&F) {
     BlockItems body;
     if (consume(tok::l_brace))
         return _errorhandler();
+    Actions.enterScope();
     // Parse statement sequence - fail immediately on error
     if (parseBlock(body))
         return _errorhandler();
+    Actions.exitScope();
     if (consume(tok::r_brace))
         return _errorhandler();
     F->setBody(body);
@@ -93,8 +95,18 @@ bool Parser::parseDeclaration(BlockItems& Items) {
         advance();
         if (expect(tok::identifier))
             return true;
-        Var* var = Actions.actOnIdentifier(Tok.getLocation(), Tok.getIdentifier());
+        StringRef var = Tok.getIdentifier();
         advance();
+
+        // We generate the declaration first, so the variable
+        // exists in the scope
+        if (Actions.actOnVarDeclaration(Items, Loc, var))
+            return true;
+        // now we can generate the expression,
+        // if the variable is used in the declaration
+        // this is compliant with the standard, but it
+        // is an undefined behavior.
+        Declaration * decl = std::get<Declaration*>(Items.back());
         Expr * exp = nullptr;
         // the assignment to the declaration is
         // optional
@@ -106,7 +118,7 @@ bool Parser::parseDeclaration(BlockItems& Items) {
         if (consume(tok::semi))
             return true;
 
-        Actions.actOnVarDeclaration(Items, Loc, var, exp);
+        decl->setExpr(exp);
         return false;
     }
 
@@ -211,7 +223,8 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
     Expr *right;
 
     // Parse as a left part a factor
-    parseFactor(left);
+    if (parseFactor(left))
+        _errorhandler();
 
     while (Tok.isOneOf(
             // Chapter 3
@@ -250,6 +263,8 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             // in opposite to parsing a binary expression
             parseExpr(right, precedence);
             left = Actions.actOnAssignment(Loc, left, right);
+            if (left == nullptr)
+                _errorhandler();
         }
         else
         {
@@ -284,6 +299,8 @@ bool Parser::parseFactor(Expr *&E) {
     }
     else if (Tok.is(tok::identifier)) {
         E = Actions.actOnIdentifier(Tok.getLocation(), Tok.getIdentifier());
+        if (!E)
+            return true;
         advance();
     }
     else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim)) {

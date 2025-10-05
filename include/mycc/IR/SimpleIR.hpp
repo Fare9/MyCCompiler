@@ -3,6 +3,7 @@
 #include "mycc/Basic/LLVM.hpp"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringMap.h"
 
 #include <utility>
 #include <vector>
@@ -108,6 +109,18 @@ public:
     
     [[nodiscard]] std::string to_string() const override {
         return "%r" + std::to_string(RegID);
+    }
+};
+
+class VarOp : public Operand {
+    std::string Name;
+public:
+    explicit VarOp(StringRef Name) : Name(Name) {}
+
+    [[nodiscard]] std::string getName() const { return Name; }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "%" + Name;
     }
 };
 
@@ -705,6 +718,7 @@ public:
 };
 
 class Context {
+    StringMap<VarOp *> Variables;
     std::unordered_map<std::int64_t, Int*> all_integer_values;
     std::vector<std::unique_ptr<Value>> Values;
     unsigned NextRegID = 0;
@@ -765,6 +779,16 @@ public:
         auto* RegVal = new Reg(NextRegID++);
         Values.emplace_back(RegVal);
         return RegVal;
+    }
+
+    VarOp* getOrCreateVar(StringRef Name) {
+        if (Variables.contains(Name)) {
+            return Variables[Name];
+        }
+        auto * newVar = new VarOp(Name);
+        Values.emplace_back(newVar);
+        Variables[Name] = newVar;
+        return newVar;
     }
 
     Copy* createCopy(Value* src, Value* dst) {

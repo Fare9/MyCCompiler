@@ -16,13 +16,26 @@ ir::Function* IRGenerator::generateFunction(const Function& ASTFunc) {
     // Create new IR function
     ir::InstList instructions;
     auto* IRFunc = new ir::Function(instructions, ASTFunc.getName());
-    
+
+    // simple fix for now, we generate a Return(0) if no Return exists
+    bool containsReturn = false;
+
     // Generate IR for each statement in the function
     for (const BlockItem Item : ASTFunc) {
         if (std::holds_alternative<Statement*>(Item)) {
             Statement* Stmt = std::get<Statement*>(Item);
             generateStatement(*Stmt, IRFunc);
+            if (Stmt->getKind() == Statement::SK_Return && !containsReturn) containsReturn = true;
+        } else if (std::holds_alternative<Declaration*>(Item)) {
+            Declaration* Decl = std::get<Declaration*>(Item);
+            generateDeclaration(*Decl, IRFunc);
         }
+    }
+
+    if (!containsReturn) {
+        ir::Int * RetVal = Ctx.createInt(llvm::APSInt::get(0));
+        ir::Ret* RetInst = Ctx.createRet(RetVal);
+        IRFunc->add_instruction(RetInst);
     }
     
     return IRFunc;
@@ -41,12 +54,52 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
             IRFunc->add_instruction(RetInst);
             break;
         }
+        case Statement::SK_Expression: {
+            const auto& ExprStmt = dynamic_cast<const ExpressionStatement&>(Stmt);
+            // Generate the expression
+            generateExpression(*ExprStmt.getExpr(), IRFunc);
+            break;
+        }
+        case Statement::SK_Null:
+        break;
         // Add more statement types as needed
     }
 }
 
+void IRGenerator::generateDeclaration(const Declaration& Decl, ir::Function* IRFunc) {
+    if (Decl.getExpr() == nullptr) return;
+    const auto* left = Decl.getExpr();
+    const auto* right = Decl.getExpr();
+
+    // We create a Declaration like an assignment in case
+    // this one has an expression
+
+    // First we emit the right part of the assignment
+    auto *result = generateExpression(*right, IRFunc);
+    // Now we create a copy that we include in functions
+    auto *varop = generateExpression(*left, IRFunc);
+    Ctx.createCopy(result, varop);
+}
+
 ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFunc) {
     switch (Expr.getKind()) {
+        case Expr::Ek_Var: {
+            const auto& var = dynamic_cast<const Var&>(Expr);
+            // Create a Var with the information from the one
+            // of the AST
+            return Ctx.getOrCreateVar(var.getName());
+        }
+        case Expr::Ek_AssignmentOperator: {
+            const auto& assignment = dynamic_cast<const AssignmentOperator&>(Expr);
+            const auto* left = assignment.getLeft();
+            const auto* right = assignment.getRight();
+            // First we emit the right part of the assignment
+            auto *result = generateExpression(*right, IRFunc);
+            // Now we create a copy that we include in functions
+            auto *varop = generateExpression(*left, IRFunc);
+            IRFunc->add_instruction(Ctx.createCopy(result, varop));
+            return varop;
+        }
         case Expr::Ek_Int: {
             const auto& IntLit = dynamic_cast<const IntegerLiteral&>(Expr);
             

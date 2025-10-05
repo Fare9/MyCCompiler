@@ -218,7 +218,7 @@ std::string ASTPrinter::printAssignmentOperator(const AssignmentOperator* expr, 
 std::string ASTPrinter::printDeclaration(const Declaration* decl, int indent) {
     std::string output = getIndent(indent) + "Declaration\n";
     output += getIndent(indent + 1) + "Name:\n";
-    output += printVar(decl->getName(), indent + 2);
+    output += printVar(decl->getVar(), indent + 2);
     if (decl->getExpr()) {
         output += getIndent(indent + 1) + "Initializer:\n";
         output += print(decl->getExpr(), indent + 2);
