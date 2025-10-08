@@ -309,6 +309,8 @@ X64Operand* X64CodeGenerator::convertOperand(const ir::Value* Val, X64Context& C
         return convertInteger(*Imm, Ctx);
     if (const auto * Reg = dynamic_cast<const ir::Reg*>(Val))
         return convertRegister(*Reg, Ctx);
+    if (const auto * Var = dynamic_cast<const ir::VarOp*>(Val))
+        return convertVariable(*Var, Ctx);
     return nullptr;
 }
 
@@ -318,6 +320,13 @@ X64Register* X64CodeGenerator::convertRegister(const ir::Reg& Reg, X64Context& C
 
 X64Int* X64CodeGenerator::convertInteger(const ir::Int& IntVal, X64Context& Ctx) {
     return Ctx.createInt(IntVal.getValue());
+}
+
+X64Register* X64CodeGenerator::convertVariable(const ir::VarOp& Var, X64Context& Ctx) {
+    // Use variable name hash as pseudo register ID to ensure same variable 
+    // gets same pseudo register across different uses
+    unsigned pseudoID = std::hash<std::string>{}(Var.getName());
+    return Ctx.getPseudoReg(pseudoID);
 }
 
 // ===== Phase 2: Stack Allocation =====

@@ -48,6 +48,7 @@ private:
     X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);
     X64Register* convertRegister(const ir::Reg& Reg, X64Context& Ctx);
     X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
+    X64Register* convertVariable(const ir::VarOp& Var, X64Context& Ctx);
     
     // Phase 2: Replace pseudo-registers with stack allocations
     void allocateStackSlots();

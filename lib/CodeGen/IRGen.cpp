@@ -68,7 +68,7 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
 
 void IRGenerator::generateDeclaration(const Declaration& Decl, ir::Function* IRFunc) {
     if (Decl.getExpr() == nullptr) return;
-    const auto* left = Decl.getExpr();
+    const auto* left = Decl.getVar();
     const auto* right = Decl.getExpr();
 
     // We create a Declaration like an assignment in case
@@ -78,7 +78,7 @@ void IRGenerator::generateDeclaration(const Declaration& Decl, ir::Function* IRF
     auto *result = generateExpression(*right, IRFunc);
     // Now we create a copy that we include in functions
     auto *varop = generateExpression(*left, IRFunc);
-    Ctx.createCopy(result, varop);
+    IRFunc->add_instruction(Ctx.createCopy(result, varop));
 }
 
 ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFunc) {
