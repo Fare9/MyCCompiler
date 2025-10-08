@@ -76,8 +76,19 @@ mkdir build && cd build
 cmake ..
 make
 
-# Compile a C source file
-./mycc input.c -o output.s
+# Compile a C source file (generates input.s assembly file)
+./mycc input.c
+
+# Run specific compilation phases
+./mycc --lex input.c          # Lexer only
+./mycc --parse input.c        # Lexer and parser
+./mycc --validate input.c     # Semantic analysis
+./mycc --tacky input.c        # Generate IR
+./mycc --codegen input.c      # Full compilation without executable
+
+# Print output to console
+./mycc --print input.c        # Show assembly output
+./mycc --tacky --print input.c # Show IR output
 ```
 
 ## Dependencies
