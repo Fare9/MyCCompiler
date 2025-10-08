@@ -29,13 +29,13 @@ void Sema::initialize() {
 }
 
 Program * Sema::actOnProgramDeclaration(FuncList &Funcs) {
-    auto * p = new Program();
+    auto * p = Context.createProgram<Program>();
     p->add_functions(Funcs);
     return p;
 }
 
 Function * Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
-    auto* func = new Function(Name, Loc);
+    auto* func = Context.createFunction<Function>(Name, Loc);
 
     return func;
 }
@@ -47,7 +47,8 @@ bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
     pushVariableName(originalName, uniqueName);
 
     // Create declaration with unique name
-    auto* decl = new Declaration(Loc, new Var(Loc, uniqueName));
+    auto* var = Context.createExpression<Var>(Loc, uniqueName);
+    auto* decl = Context.createDeclaration<Declaration>(Loc, var);
 
     // Add to current scope if it exists, using original name as key
     if (CurrentScope) {
@@ -67,30 +68,30 @@ bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
 }
 
 void Sema::actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal) {
-    Items.push_back(new ReturnStatement(RetVal));
+    Items.push_back(Context.createStatement<ReturnStatement>(RetVal));
 }
 
 void Sema::actOnNullStatement(BlockItems& Items, SMLoc Loc) {
-    Items.push_back(new NullStatement());
+    Items.push_back(Context.createStatement<NullStatement>());
 }
 
 void Sema::actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr) {
-    Items.push_back(new ExpressionStatement(Expr));
+    Items.push_back(Context.createStatement<ExpressionStatement>(Expr));
 }
 
 IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     uint8_t Radix = 10;
 
     llvm::APInt Value(64, Literal, Radix);
-    return new IntegerLiteral(Loc, llvm::APSInt(Value, false));
+    return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value, false));
 }
 
 UnaryOperator* Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr) {
-    return new UnaryOperator(Loc, Kind, expr);
+    return Context.createExpression<UnaryOperator>(Loc, Kind, expr);
 }
 
 BinaryOperator* Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr* left, Expr* right) {
-    return new BinaryOperator(Loc, Kind, left, right);
+    return Context.createExpression<BinaryOperator>(Loc, Kind, left, right);
 }
 
 AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
@@ -101,7 +102,7 @@ AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
         }
     }
 
-    return new AssignmentOperator(Loc, left, right);
+    return Context.createExpression<AssignmentOperator>(Loc, left, right);
 }
 
 Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
@@ -118,11 +119,11 @@ Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
         else {
             // Variable exists, get the unique name for it
             std::string uniqueName = getCurrentUniqueVarName(Name);
-            return new Var(Loc, uniqueName);
+            return Context.createExpression<Var>(Loc, uniqueName);
         }
     }
 
-    return new Var(Loc, Name);
+    return Context.createExpression<Var>(Loc, Name);
 }
 
 std::string Sema::generateUniqueVarName(StringRef originalName) {

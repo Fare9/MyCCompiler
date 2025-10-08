@@ -8,6 +8,7 @@
 
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/AST/ASTContext.hpp"
 #include "mycc/AST/ASTPrinter.hpp"
 
 #include "mycc/Basic/Diagnostic.hpp"
@@ -92,8 +93,9 @@ int main(int argc, char **argv) {
 
         SrcMgr.AddNewSourceBuffer(std::move(*FileOrErr), llvm::SMLoc());
         auto Lexer = mycc::Lexer(SrcMgr, Diags);
-        auto Sema = mycc::Sema(Lexer.getDiagnostics());
-        auto Parser = mycc::Parser(Lexer, Sema);
+        auto ASTContext = mycc::ASTContext(SrcMgr, F);
+        auto Sema = mycc::Sema(Lexer.getDiagnostics(), ASTContext);
+        auto Parser = mycc::Parser(Lexer, Sema, ASTContext);
         mycc::ir::Context Context;
         mycc::ir::Program Program;
         auto irGen = mycc::codegen::IRGenerator(Context, Program);
@@ -125,7 +127,7 @@ int main(int argc, char **argv) {
             // run with semantic analysis with errors
             if (!semantic)
                 Sema.avoidErrors();
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -134,11 +136,11 @@ int main(int argc, char **argv) {
                 return 2;
             }
             if (print_output) {
-                std::cout << "AST: " << mycc::ASTPrinter::print(p.get()) << std::endl;
+                std::cout << "AST: " << mycc::ASTPrinter::print(p) << std::endl;
             }
         }
         if (tacky) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -152,7 +154,7 @@ int main(int argc, char **argv) {
             }
         }
         if (codegen) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -170,7 +172,7 @@ int main(int argc, char **argv) {
             }
         }
         if (compile) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";

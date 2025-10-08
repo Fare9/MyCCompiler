@@ -79,9 +79,7 @@ public:
     explicit ReturnStatement(Expr * RetVal) : Statement(SK_Return), RetVal(RetVal) {
     }
 
-    ~ReturnStatement() override {
-        delete RetVal;
-    }
+    ~ReturnStatement() override = default;
 
     Expr * getRetVal() const {
         return RetVal;
@@ -97,9 +95,7 @@ class ExpressionStatement : public Statement {
 public:
     explicit ExpressionStatement(Expr * expr) : Statement(SK_Expression), expr(expr) {}
 
-    ~ExpressionStatement() override {
-        delete expr;
-    }
+    ~ExpressionStatement() override = default;
 
     Expr * getExpr() const {
         return expr;
@@ -180,9 +176,7 @@ public:
         Expr(Ek_UnaryOperator), Loc(Loc), UnaryKind(UnaryKind), expr(expr) {
     }
 
-    ~UnaryOperator() override {
-        delete expr;
-    }
+    ~UnaryOperator() override = default;
 
     [[nodiscard]] UnaryOperatorKind getOperatorKind() const {
         return UnaryKind;
@@ -242,10 +236,7 @@ public:
         : Expr(Ek_BinaryOperator), Loc(Loc), BinaryKind(BinaryKind), left(left), right(right) {
     }
 
-    ~BinaryOperator() override {
-        delete left;
-        delete right;
-    }
+    ~BinaryOperator() override = default;
 
     [[nodiscard]] BinaryOpKind getOperatorKind() const {
         return BinaryKind;
@@ -272,10 +263,7 @@ public:
     AssignmentOperator(SMLoc Loc, Expr * left, Expr * right) :
         Expr(Ek_AssignmentOperator), Loc(Loc), left(left), right(right) {}
 
-    ~AssignmentOperator() override {
-        delete left;
-        delete right;
-    }
+    ~AssignmentOperator() override = default;
 
     Expr * getLeft() const
     {
@@ -302,12 +290,7 @@ class Declaration {
 public:
     Declaration(SMLoc Loc, Var* Name) : Loc(Loc), Name(Name) {}
     Declaration(SMLoc Loc, Var* Name, Expr * expr) : Loc(Loc), Name(Name), expr(expr) {}
-    ~Declaration() {
-        delete Name;
-
-        if (expr)
-            delete expr;
-    }
+    ~Declaration() = default;
 
     [[nodiscard]] Var * getVar() const
     {
@@ -332,17 +315,7 @@ public:
     Function(StringRef Name, SMLoc Loc) : Name(Name), Loc(Loc) {
     }
 
-    ~Function() {
-        for (auto& item : body) {
-            if (std::holds_alternative<Statement *>(item)) {
-                delete std::get<Statement *>(item);
-            }
-            else if (std::holds_alternative<Declaration *>(item)) {
-                delete std::get<Declaration *>(item);
-            }
-        }
-        body.clear();
-    }
+    ~Function() = default;
 
     [[nodiscard]] StringRef getName() const {
         return Name;
@@ -386,11 +359,7 @@ class Program {
 public:
     Program() = default;
     
-    ~Program() {
-        for (Function* func : functions) {
-            delete func;
-        }
-    }
+    ~Program() = default;
 
     void add_functions(FuncList & funcs) {
         functions = std::move(funcs);

@@ -6,13 +6,13 @@
 
 using namespace mycc;
 
-Parser::Parser(Lexer &Lex, Sema &Actions) : Lex(Lex), Actions(Actions) {
+Parser::Parser(Lexer &Lex, Sema &Actions, ASTContext &Context) : Lex(Lex), Actions(Actions), Context(Context) {
 }
 
-std::unique_ptr<Program> Parser::parse() {
+Program* Parser::parse() {
     Program * p = nullptr;
     parseProgram(p);
-    return std::unique_ptr<Program>(p);
+    return p;
 }
 
 bool Parser::parseProgram(Program *&P) {
@@ -248,8 +248,48 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             tok::ampamp,
             tok::pipepipe,
             // Chapter 5
-            tok::equal)) {
-        if (Tok.is(tok::equal))
+            tok::equal,
+            tok::compoundadd,
+            tok::compoundsub,
+            tok::compoundmul,
+            tok::compounddiv,
+            tok::compoundrem)) {
+        if (Tok.isOneOf(tok::compoundadd,
+            tok::compoundsub,
+            tok::compoundmul,
+            tok::compounddiv,
+            tok::compoundrem)) {
+            tok::TokenKind compoundToken = Tok.getKind();
+            BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
+            int precedence = binary_operators_precedence[Kind];
+            if (precedence < min_precedence) break;
+            SMLoc Loc = Tok.getLocation();
+            // consume the compound token
+            advance();
+            // parse the expression
+            // now parse the expression, this time
+            // we do not add +1 so we can have right-precedence
+            // in opposite to parsing a binary expression
+            parseExpr(right, precedence);
+            Expr *tempResult = nullptr;
+            if (compoundToken == tok::compoundadd) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Add, left, right);
+            } else if (compoundToken == tok::compoundsub) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Subtract, left, right);
+            } else if (compoundToken == tok::compoundmul) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Multiply, left, right);
+            } else if (compoundToken == tok::compounddiv) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Divide, left, right);
+            } else if (compoundToken == tok::compoundrem) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Remainder, left, right);
+            }
+            // Final assignment step: left = tempResult
+            left = Actions.actOnAssignment(Loc, left, tempResult);
+            if (left == nullptr)
+                _errorhandler();
+
+        }
+        else if (Tok.is(tok::equal))
         {
             BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
             int precedence = binary_operators_precedence[Kind];

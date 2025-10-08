@@ -3,6 +3,7 @@
 #include "mycc/Basic/Diagnostic.hpp"
 #include "mycc/Lexer/Lexer.hpp"
 #include "mycc/Sema/Sema.hpp"
+#include "mycc/AST/ASTContext.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -17,6 +18,8 @@ class Parser {
     // @brief Sema object will apply semantic checks later, for now
     // it will just create objects
     Sema &Actions;
+    // @brief AST context for memory management
+    ASTContext &Context;
     // @brief Current Token
     Token Tok;
 
@@ -104,9 +107,9 @@ class Parser {
 
     static BinaryOperator::BinaryOpKind parseBinOp(Token& Tok);
 public:
-    Parser(Lexer &Lex, Sema &Actions);
+    Parser(Lexer &Lex, Sema &Actions, ASTContext &Context);
 
-    std::unique_ptr<Program> parse();
+    Program* parse();
 };
 
 

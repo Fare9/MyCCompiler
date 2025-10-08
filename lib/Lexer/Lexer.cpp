@@ -126,10 +126,8 @@ void Lexer::next(Token &Result) {
     case ch:                                \
         formToken(Result, CurPtr + 1, tok); \
         break
-        CASE('*', tok::star);    // * character
         CASE(',', tok::comma);   // , character
         CASE('.', tok::period);  // . character
-        CASE('%', tok::percent);
         CASE('^', tok::caret);
         CASE(':', tok::colon);   // : character
         CASE(';', tok::semi);    // ; character (end of code line)
@@ -144,14 +142,30 @@ void Lexer::next(Token &Result) {
         case '+':
             if (*(CurPtr + 1) == '+')
                 formToken(Result, CurPtr+2, tok::increment);
+            else if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundadd);
             else
                 formToken(Result, CurPtr+1, tok::plus);
             break;
         case '-':
             if (*(CurPtr + 1) == '-')
                 formToken(Result, CurPtr+2, tok::decrement);
+            else if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundsub);
             else
                 formToken(Result, CurPtr+1, tok::minus);
+            break;
+        case '*':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundmul);
+            else
+                formToken(Result, CurPtr+1, tok::star);
+            break;
+        case '%':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundrem);
+            else
+                formToken(Result, CurPtr+1, tok::percent);
             break;
         case '=':
             if (*(CurPtr + 1) == '=')

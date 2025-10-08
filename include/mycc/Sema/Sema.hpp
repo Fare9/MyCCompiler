@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/AST/ASTContext.hpp"
 #include "mycc/Sema/Scope.hpp"
 #include "mycc/Basic/Diagnostic.hpp"
 #include "llvm/ADT/StringMap.h"
@@ -12,6 +13,7 @@ class Sema {
     friend class EnterDeclScope;
 
     DiagnosticsEngine &Diags;
+    ASTContext &Context;
     Scope *CurrentScope;
     bool avoid_errors = false;
 
@@ -28,7 +30,7 @@ class Sema {
     void popVariablesFromScope(const std::vector<std::string>& declaredVars);
 
 public:
-    explicit Sema(DiagnosticsEngine &Diags) : Diags(Diags) {
+    explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context) {
         initialize();
     }
 
