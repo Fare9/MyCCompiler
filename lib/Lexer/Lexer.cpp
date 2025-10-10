@@ -128,7 +128,6 @@ void Lexer::next(Token &Result) {
         break
         CASE(',', tok::comma);   // , character
         CASE('.', tok::period);  // . character
-        CASE('^', tok::caret);
         CASE(':', tok::colon);   // : character
         CASE(';', tok::semi);    // ; character (end of code line)
         CASE('(', tok::l_paren); // beginning of parenthesis
@@ -182,28 +181,40 @@ void Lexer::next(Token &Result) {
         case '<':
             if (*(CurPtr + 1) == '=')
                 formToken(Result, CurPtr+2, tok::lessequal);
-            else if (*(CurPtr + 1) == '<')
-                formToken(Result, CurPtr+2, tok::lessless);
+            else if (*(CurPtr + 1) == '<') {
+                if (*(CurPtr + 2) == '=')
+                    formToken(Result, CurPtr+3, tok::compoundshl);
+                else
+                    formToken(Result, CurPtr+2, tok::lessless);
+            }
             else
                 formToken(Result, CurPtr+1, tok::less);
             break;
         case '>':
             if (*(CurPtr + 1) == '=')
                 formToken(Result, CurPtr+2, tok::greaterequal);
-            else if (*(CurPtr + 1) == '>')
-                formToken(Result, CurPtr+2, tok::greatergreater);
+            else if (*(CurPtr + 1) == '>') {
+                if (*(CurPtr + 2) == '=')
+                    formToken(Result, CurPtr+3, tok::compoundshr);
+                else
+                    formToken(Result, CurPtr+2, tok::greatergreater);
+            }
             else
                 formToken(Result, CurPtr+1, tok::greater);
             break;
         case '&':
             if (*(CurPtr + 1) == '&')
                 formToken(Result, CurPtr+2, tok::ampamp);
+            else if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundand);
             else
                 formToken(Result, CurPtr+1, tok::amp);
             break;
         case '|':
             if (*(CurPtr + 1) == '|')
                 formToken(Result, CurPtr+2, tok::pipepipe);
+            else if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundor);
             else
                 formToken(Result, CurPtr+1, tok::pipe);
             break;
@@ -222,10 +233,18 @@ void Lexer::next(Token &Result) {
                 // after the comment we need to return a Token
                 next(Result);
             }
+            else if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compounddiv);
             // slash token
             else {
                 formToken(Result, CurPtr + 1, tok::slash);
             }
+            break;
+        case '^':
+            if (*(CurPtr + 1) == '=')
+                formToken(Result, CurPtr+2, tok::compoundxor);
+            else
+                formToken(Result, CurPtr+1, tok::caret);
             break;
         case '#':
             // for the moment skip it until we have some code

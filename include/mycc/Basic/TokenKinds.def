@@ -61,6 +61,11 @@ PUNCTUATOR(compoundsub, "-=")
 PUNCTUATOR(compoundmul, "*=")
 PUNCTUATOR(compounddiv, "/=")
 PUNCTUATOR(compoundrem, "%=")
+PUNCTUATOR(compoundand, "&=")
+PUNCTUATOR(compoundor, "|=")
+PUNCTUATOR(compoundxor, "^=")
+PUNCTUATOR(compoundshl, "<<=")
+PUNCTUATOR(compoundshr, ">>=")
 
 /// keywords used during the program
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'

@@ -253,12 +253,22 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             tok::compoundsub,
             tok::compoundmul,
             tok::compounddiv,
-            tok::compoundrem)) {
+            tok::compoundrem,
+            tok::compoundand,
+            tok::compoundor,
+            tok::compoundxor,
+            tok::compoundshl,
+            tok::compoundshr)) {
         if (Tok.isOneOf(tok::compoundadd,
             tok::compoundsub,
             tok::compoundmul,
             tok::compounddiv,
-            tok::compoundrem)) {
+            tok::compoundrem,
+            tok::compoundand,
+            tok::compoundor,
+            tok::compoundxor,
+            tok::compoundshl,
+            tok::compoundshr)) {
             tok::TokenKind compoundToken = Tok.getKind();
             BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
             int precedence = binary_operators_precedence[Kind];
@@ -282,6 +292,16 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
                 tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Divide, left, right);
             } else if (compoundToken == tok::compoundrem) {
                 tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_Remainder, left, right);
+            } else if (compoundToken == tok::compoundand) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_BitwiseAnd, left, right);
+            } else if (compoundToken == tok::compoundor) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_BitwiseOr, left, right);
+            } else if (compoundToken == tok::compoundxor) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_BitwiseXor, left, right);
+            } else if (compoundToken == tok::compoundshl) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_LeftShift, left, right);
+            } else if (compoundToken == tok::compoundshr) {
+                tempResult = Actions.actOnBinaryOperator(Loc, BinaryOperator::BoK_RightShift, left, right);
             }
             // Final assignment step: left = tempResult
             left = Actions.actOnAssignment(Loc, left, tempResult);
