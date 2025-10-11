@@ -55,6 +55,17 @@ PUNCTUATOR(r_brace, "}")
 PUNCTUATOR(tilde, "~")          // Added ~ for complement operator
 PUNCTUATOR(decrement, "--")     // Added decrement operator
 PUNCTUATOR(increment, "++")     // Added increment operator
+// Compound statements
+PUNCTUATOR(compoundadd, "+=")
+PUNCTUATOR(compoundsub, "-=")
+PUNCTUATOR(compoundmul, "*=")
+PUNCTUATOR(compounddiv, "/=")
+PUNCTUATOR(compoundrem, "%=")
+PUNCTUATOR(compoundand, "&=")
+PUNCTUATOR(compoundor, "|=")
+PUNCTUATOR(compoundxor, "^=")
+PUNCTUATOR(compoundshl, "<<=")
+PUNCTUATOR(compoundshr, ">>=")
 
 /// keywords used during the program
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'

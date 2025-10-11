@@ -8,6 +8,7 @@
 
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/AST/ASTContext.hpp"
 #include "mycc/AST/ASTPrinter.hpp"
 
 #include "mycc/Basic/Diagnostic.hpp"
@@ -23,6 +24,7 @@
 
 bool lexer = false;
 bool parser = false;
+bool semantic = false;
 bool tacky = false;
 bool codegen = false;
 bool compile = false;
@@ -39,6 +41,7 @@ void print_help() {
               << "\nOptions:\n"
               << "  --lex      Run lexer only\n"
               << "  --parse    Run lexer and parser\n"
+              << "  --validate Run semantic analysis on top of parser\n"
               << "  --tacky    Run lexer, parser and generate IR\n"
               << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
               << "  --help     Show this help message\n"
@@ -54,6 +57,10 @@ int main(int argc, char **argv) {
             {"--lex",     [&]() { lexer = true; }},
             {"--parse",   [&]() {
                 parser = true;
+            }},
+            {"--validate", [&](){
+                parser = true;
+                semantic = true;
             }},
             {"--tacky", [&]() {
                 tacky = true;
@@ -86,8 +93,9 @@ int main(int argc, char **argv) {
 
         SrcMgr.AddNewSourceBuffer(std::move(*FileOrErr), llvm::SMLoc());
         auto Lexer = mycc::Lexer(SrcMgr, Diags);
-        auto Sema = mycc::Sema(Lexer.getDiagnostics());
-        auto Parser = mycc::Parser(Lexer, Sema);
+        auto ASTContext = mycc::ASTContext(SrcMgr, F);
+        auto Sema = mycc::Sema(Lexer.getDiagnostics(), ASTContext);
+        auto Parser = mycc::Parser(Lexer, Sema, ASTContext);
         mycc::ir::Context Context;
         mycc::ir::Program Program;
         auto irGen = mycc::codegen::IRGenerator(Context, Program);
@@ -115,7 +123,11 @@ int main(int argc, char **argv) {
             Lexer.reset();
         }
         if (parser) {
-            auto p = Parser.parse();
+            // if --validate is provided, parser is
+            // run with semantic analysis with errors
+            if (!semantic)
+                Sema.avoidErrors();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -124,11 +136,11 @@ int main(int argc, char **argv) {
                 return 2;
             }
             if (print_output) {
-                std::cout << "AST: " << mycc::ASTPrinter::print(p.get()) << std::endl;
+                std::cout << "AST: " << mycc::ASTPrinter::print(p) << std::endl;
             }
         }
         if (tacky) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -142,7 +154,7 @@ int main(int argc, char **argv) {
             }
         }
         if (codegen) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -160,7 +172,7 @@ int main(int argc, char **argv) {
             }
         }
         if (compile) {
-            auto p = Parser.parse();
+            mycc::Program* p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
