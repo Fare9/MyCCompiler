@@ -49,6 +49,8 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printExpressionStatement(dynamic_cast<const ExpressionStatement*>(statement), indent);
         case Statement::SK_Null:
             return printNullStatement(dynamic_cast<const NullStatement*>(statement), indent);
+        case Statement::SK_If:
+            return printIfStatement(dynamic_cast<const IfStatement*>(statement), indent);
     }
     return getIndent(indent) + "Unknown Statement\n";
 }
@@ -75,6 +77,8 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
             return printPrefixOperator(dynamic_cast<const PrefixOperator*>(expr), indent);
         case Expr::Ek_PostfixOperator:
             return printPostfixOperator(dynamic_cast<const PostfixOperator*>(expr), indent);
+        case Expr::Ek_ConditionalOperator:
+            return printConditionalExpr(dynamic_cast<const ConditionalExpr*>(expr), indent);
     }
     return getIndent(indent) + "Unknown Expression\n";
 }
@@ -259,6 +263,64 @@ std::string ASTPrinter::printDeclaration(const Declaration* decl, int indent) {
         output += getIndent(indent + 1) + "Initializer:\n";
         output += print(decl->getExpr(), indent + 2);
     }
+    return output;
+}
+
+std::string ASTPrinter::printIfStatement(const IfStatement* stmt, int indent) {
+    std::string output = getIndent(indent) + "IfStatement\n";
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->getCondition()) {
+        output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print then statement
+    output += getIndent(indent + 1) + "Then:\n";
+    if (stmt->getThenSt()) {
+        output += print(stmt->getThenSt(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print else statement (if it exists)
+    if (stmt->getElseSt()) {
+        output += getIndent(indent + 1) + "Else:\n";
+        output += print(stmt->getElseSt(), indent + 2);
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printConditionalExpr(const ConditionalExpr* expr, int indent) {
+    std::string output = getIndent(indent) + "ConditionalExpr\n";
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (expr->getCondition()) {
+        output += print(expr->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print left (true) expression
+    output += getIndent(indent + 1) + "TrueExpr:\n";
+    if (expr->getLeft()) {
+        output += print(expr->getLeft(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print right (false) expression
+    output += getIndent(indent + 1) + "FalseExpr:\n";
+    if (expr->getRight()) {
+        output += print(expr->getRight(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
     return output;
 }
 

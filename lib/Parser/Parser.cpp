@@ -3,6 +3,7 @@
 
 #include "mycc/AST/AST.hpp"
 #include "mycc/AST/AST.hpp"
+#include "mycc/AST/AST.hpp"
 
 using namespace mycc;
 
@@ -135,6 +136,10 @@ bool Parser::parseStatement(BlockItems& Items) {
         Actions.actOnNullStatement(Items, Tok.getLocation());
         consume(tok::semi);
         return false;
+    } else if (Tok.is(tok::kw_if)) {
+        if (parseIfStmt(Items))
+            return true;
+        return false;
     } else {
         if (parseExprStmt(Items))
             return true;
@@ -175,35 +180,94 @@ bool Parser::parseExprStmt(BlockItems& Items) {
     return false;
 }
 
-std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedence = {
-{BinaryOperator::BinaryOpKind::BoK_Multiply, 50},
-{BinaryOperator::BinaryOpKind::BoK_Divide, 50},
-{BinaryOperator::BinaryOpKind::BoK_Remainder, 50},
-{BinaryOperator::BinaryOpKind::BoK_Add, 45},
-{BinaryOperator::BinaryOpKind::BoK_Subtract, 45},
-   // Bitwise shift operators (precedence 5 in C standard)
-{BinaryOperator::BinaryOpKind::BoK_LeftShift, 40},
-{BinaryOperator::BinaryOpKind::BoK_RightShift, 40},
-   // minor than, minor equal, greater than, greater equal
-    {BinaryOperator::BinaryOpKind::BoK_LowerThan, 35},
-{BinaryOperator::BinaryOpKind::BoK_LowerEqual, 35},
-{BinaryOperator::BinaryOpKind::BoK_GreaterThan, 35},
-{BinaryOperator::BinaryOpKind::BoK_GreaterEqual, 35},
-{BinaryOperator::BinaryOpKind::Bok_Equal, 30},
-{BinaryOperator::BinaryOpKind::Bok_NotEqual, 30},
-  // Relational operators would be ~35 (precedence 6-7)
-  // Equality operators would be ~30 (precedence 7)
-  // Bitwise AND (precedence 8 in C standard)
-{BinaryOperator::BinaryOpKind::BoK_BitwiseAnd, 25},
-  // Bitwise XOR (precedence 9 in C standard)
-{BinaryOperator::BinaryOpKind::BoK_BitwiseXor, 20},
-  // Bitwise OR (precedence 10 in C standard)
-{BinaryOperator::BinaryOpKind::BoK_BitwiseOr, 15},
-    // Logical AND and OR
-{BinaryOperator::BinaryOpKind::Bok_And, 10},
-{BinaryOperator::BinaryOpKind::Bok_Or, 5},
-{BinaryOperator::BinaryOpKind::Bok_Assign, 1},
-};
+bool Parser::parseIfStmt(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    Expr * Cond = nullptr;
+    BlockItems then_sts;
+    BlockItems else_sts;
+
+    if (consume(tok::kw_if))
+        return true;
+    // Parse expression in between parenthesis "(" <Exp> ")"
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    // now consume the statements inside the then
+    if (Tok.is(tok::l_brace)) {
+        advance();
+        while (!(Tok.is(tok::r_brace))) {
+            if (parseStatement(then_sts))
+                return true;
+        }
+        advance();
+    } else {
+        if (parseStatement(then_sts))
+            return true;
+    }
+    // if there's an else statement
+    if (Tok.is(tok::kw_else))
+    {
+        advance();
+        if (Tok.is(tok::l_brace)) {
+            advance();
+            while (!(Tok.is(tok::r_brace))) {
+                if (parseStatement(else_sts))
+                    return true;
+            }
+            advance();
+        } else {
+            if (parseStatement(else_sts))
+                return true;
+        }
+    }
+
+    Statement * then_st = then_sts.empty() ? nullptr : std::get<Statement*>(then_sts.back());
+    Statement * else_st = else_sts.empty() ? nullptr : std::get<Statement*>(else_sts.back());
+
+    Actions.actOnIfStatement(Items, Loc, Cond, then_st, else_st);
+    return false;
+}
+
+namespace
+{
+    std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedence = {
+        {BinaryOperator::BinaryOpKind::BoK_Multiply, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Divide, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Remainder, 50},
+        {BinaryOperator::BinaryOpKind::BoK_Add, 45},
+        {BinaryOperator::BinaryOpKind::BoK_Subtract, 45},
+           // Bitwise shift operators (precedence 5 in C standard)
+        {BinaryOperator::BinaryOpKind::BoK_LeftShift, 40},
+        {BinaryOperator::BinaryOpKind::BoK_RightShift, 40},
+           // minor than, minor equal, greater than, greater equal
+            {BinaryOperator::BinaryOpKind::BoK_LowerThan, 35},
+        {BinaryOperator::BinaryOpKind::BoK_LowerEqual, 35},
+        {BinaryOperator::BinaryOpKind::BoK_GreaterThan, 35},
+        {BinaryOperator::BinaryOpKind::BoK_GreaterEqual, 35},
+        {BinaryOperator::BinaryOpKind::Bok_Equal, 30},
+        {BinaryOperator::BinaryOpKind::Bok_NotEqual, 30},
+          // Relational operators would be ~35 (precedence 6-7)
+          // Equality operators would be ~30 (precedence 7)
+          // Bitwise AND (precedence 8 in C standard)
+        {BinaryOperator::BinaryOpKind::BoK_BitwiseAnd, 25},
+          // Bitwise XOR (precedence 9 in C standard)
+        {BinaryOperator::BinaryOpKind::BoK_BitwiseXor, 20},
+          // Bitwise OR (precedence 10 in C standard)
+        {BinaryOperator::BinaryOpKind::BoK_BitwiseOr, 15},
+            // Logical AND and OR
+        {BinaryOperator::BinaryOpKind::Bok_And, 10},
+        {BinaryOperator::BinaryOpKind::Bok_Or, 5},
+            // ? expression for ternary operators
+        {BinaryOperator::BinaryOpKind::Bok_Interrogation, 3},
+            // = for assignments
+        {BinaryOperator::BinaryOpKind::Bok_Assign, 1},
+        };
+}
 
 bool Parser::parseExpr(Expr *&E, int min_precedence) {
     auto _errorhandler = [this] {
@@ -258,7 +322,9 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             tok::compoundor,
             tok::compoundxor,
             tok::compoundshl,
-            tok::compoundshr)) {
+            tok::compoundshr,
+            // Chapter 6
+            tok::interrogation)) {
         if (Tok.isOneOf(tok::compoundadd,
             tok::compoundsub,
             tok::compoundmul,
@@ -309,8 +375,7 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
                 _errorhandler();
 
         }
-        else if (Tok.is(tok::equal))
-        {
+        else if (Tok.is(tok::equal)) {
             BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
             int precedence = binary_operators_precedence[Kind];
             if (precedence < min_precedence) break;
@@ -326,6 +391,21 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             if (left == nullptr)
                 _errorhandler();
         }
+        // ternary operator
+        else if (Tok.is(tok::interrogation)) {
+            SMLoc Loc = Tok.getLocation();
+            BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Interrogation;
+            int precedence = binary_operators_precedence[Kind];
+            if (precedence < min_precedence) break;
+
+            advance(); // consume '?'
+
+            Expr * middle, * right;
+            parseMiddle(middle);
+            parseExpr(right, precedence);
+
+            left = Actions.actOnTernaryOperator(Loc, left, middle, right);
+        }
         else
         {
             BinaryOperator::BinaryOpKind Kind = parseBinOp(Tok);
@@ -340,6 +420,14 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
 
     E = left;
 
+    return false;
+}
+
+bool Parser::parseMiddle(Expr *&Middle) {
+    if (parseExpr(Middle, 0))
+        return true;
+    if (consume(tok::colon))
+        return true;
     return false;
 }
 
@@ -415,6 +503,19 @@ bool Parser::parseFactor(Expr *&E) {
     else
         return _errorhandler();
     return false;
+}
+
+int Parser::get_operator_kind_by_expr(Expr * expr) {
+    if (BinaryOperator * binOp = reinterpret_cast<BinaryOperator*>(expr)) {
+        return binary_operators_precedence[binOp->getOperatorKind()];
+    }
+    if (AssignmentOperator * assignOp = reinterpret_cast<AssignmentOperator*>(expr)) {
+        return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Assign];
+    }
+    if (ConditionalExpr * condExpr = reinterpret_cast<ConditionalExpr*>(expr)) {
+        return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Interrogation];
+    }
+    return 0;
 }
 
 BinaryOperator::BinaryOpKind Parser::parseBinOp(Token& Tok) {

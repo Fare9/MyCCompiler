@@ -51,6 +51,7 @@ public:
     void actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal);
     void actOnNullStatement(BlockItems& Items, SMLoc Loc);
     void actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr);
+    void actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st);
 
     IntegerLiteral* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
     UnaryOperator* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr);
@@ -59,6 +60,7 @@ public:
     PrefixOperator* actOnPrefixOperator(SMLoc, PrefixOperator::PrefixOpKind Kind, Expr* expr);
     PostfixOperator* actOnPostfixOperator(SMLoc, PostfixOperator::PostfixOpKind Kind, Expr* expr);
     Var* actOnIdentifier(SMLoc, StringRef Name);
+    ConditionalExpr * actOnTernaryOperator(SMLoc, Expr* left, Expr* middle, Expr* right);
 };
 
 class EnterDeclScope {

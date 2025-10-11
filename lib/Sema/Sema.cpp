@@ -79,6 +79,10 @@ void Sema::actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr) {
     Items.push_back(Context.createStatement<ExpressionStatement>(Expr));
 }
 
+void Sema::actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
+    Items.push_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
+}
+
 IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     uint8_t Radix = 10;
 
@@ -146,6 +150,10 @@ Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     }
 
     return Context.createExpression<Var>(Loc, Name);
+}
+
+ConditionalExpr * Sema::actOnTernaryOperator(SMLoc, Expr* left, Expr* middle, Expr* right) {
+    return Context.createExpression<ConditionalExpr>(left, middle, right);
 }
 
 std::string Sema::generateUniqueVarName(StringRef originalName) {
