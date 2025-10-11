@@ -29,6 +29,8 @@ private:
     static std::string printUnaryOperator(const UnaryOperator* expr, int indent);
     static std::string printBinaryOperator(const BinaryOperator* expr, int indent);
     static std::string printAssignmentOperator(const AssignmentOperator* expr, int indent);
+    static std::string printPrefixOperator(const PrefixOperator* expr, int indent);
+    static std::string printPostfixOperator(const PostfixOperator* expr, int indent);
     static std::string printDeclaration(const Declaration* decl, int indent);
     
     static std::string getIndent(int level);

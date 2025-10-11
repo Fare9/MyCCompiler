@@ -56,6 +56,8 @@ public:
     UnaryOperator* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr);
     BinaryOperator* actOnBinaryOperator(SMLoc, BinaryOperator::BinaryOpKind Kind, Expr* left, Expr* right);
     AssignmentOperator* actOnAssignment(SMLoc, Expr* left, Expr* right);
+    PrefixOperator* actOnPrefixOperator(SMLoc, PrefixOperator::PrefixOpKind Kind, Expr* expr);
+    PostfixOperator* actOnPostfixOperator(SMLoc, PostfixOperator::PostfixOpKind Kind, Expr* expr);
     Var* actOnIdentifier(SMLoc, StringRef Name);
 };
 

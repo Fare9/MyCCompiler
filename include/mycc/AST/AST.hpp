@@ -54,6 +54,8 @@ public:
         Ek_UnaryOperator,
         Ek_BinaryOperator,
         Ek_AssignmentOperator,
+        Ek_PrefixOperator,
+        Ek_PostfixOperator,
     };
 private:
     const ExprKind Kind;
@@ -277,6 +279,74 @@ public:
 
     static bool classof(const Expr *E) {
         return E->getKind() == Ek_AssignmentOperator;
+    }
+};
+
+class PrefixOperator : public Expr {
+public:
+    enum PrefixOpKind {
+        POK_PreIncrement,
+        POK_PreDecrement,
+    };
+private:
+    SMLoc Loc;
+    const PrefixOpKind OpKind;
+    Expr * expr;
+public:
+    PrefixOperator(SMLoc Loc, PrefixOpKind OpKind, Expr * expr) :
+        Expr(Ek_PrefixOperator), Loc(Loc), OpKind(OpKind), expr(expr) {
+    }
+
+    ~PrefixOperator() override = default;
+
+    [[nodiscard]] PrefixOpKind getOperatorKind() const {
+        return OpKind;
+    }
+
+    Expr * getExpr() {
+        return expr;
+    }
+
+    [[nodiscard]] const Expr * getExpr() const {
+        return expr;
+    }
+
+    static bool classof(const Expr *E) {
+        return E->getKind() == Ek_PrefixOperator;
+    }
+};
+
+class PostfixOperator : public Expr {
+public:
+    enum PostfixOpKind {
+        POK_PostIncrement,
+        POK_PostDecrement,
+    };
+private:
+    SMLoc Loc;
+    const PostfixOpKind OpKind;
+    Expr * expr;
+public:
+    PostfixOperator(SMLoc Loc, PostfixOpKind OpKind, Expr * expr) :
+        Expr(Ek_PostfixOperator), Loc(Loc), OpKind(OpKind), expr(expr) {
+    }
+
+    ~PostfixOperator() override = default;
+
+    [[nodiscard]] PostfixOpKind getOperatorKind() const {
+        return OpKind;
+    }
+
+    Expr * getExpr() {
+        return expr;
+    }
+
+    [[nodiscard]] const Expr * getExpr() const {
+        return expr;
+    }
+
+    static bool classof(const Expr *E) {
+        return E->getKind() == Ek_PostfixOperator;
     }
 };
 

@@ -362,8 +362,19 @@ bool Parser::parseFactor(Expr *&E) {
         if (!E)
             return true;
         advance();
+
+        // Check for postfix operators
+        if (Tok.isOneOf(tok::increment, tok::decrement)) {
+            tok::TokenKind OpKind = Tok.getKind();
+            SMLoc OpLoc = Tok.getLocation();
+            advance();
+            if (OpKind == tok::increment)
+                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
+            else if (OpKind == tok::decrement)
+                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+        }
     }
-    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim)) {
+    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
@@ -378,6 +389,10 @@ bool Parser::parseFactor(Expr *&E) {
             E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Complement, internalExpr);
         else if (OpKind == tok::exclaim)
             E = Actions.actOnUnaryOperator(OpLoc, UnaryOperator::UnaryOperatorKind::UopK_Not, internalExpr);
+        else if (OpKind == tok::increment)
+            E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreIncrement, internalExpr);
+        else if (OpKind == tok::decrement)
+            E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreDecrement, internalExpr);
     }
     else if (Tok.is(tok::l_paren)) {
         advance();
@@ -385,6 +400,17 @@ bool Parser::parseFactor(Expr *&E) {
             return _errorhandler();
         if (consume(tok::r_paren))
             return _errorhandler();
+
+        // Check for postfix operators after parenthesized expressions
+        if (Tok.isOneOf(tok::increment, tok::decrement)) {
+            tok::TokenKind OpKind = Tok.getKind();
+            SMLoc OpLoc = Tok.getLocation();
+            advance();
+            if (OpKind == tok::increment)
+                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
+            else if (OpKind == tok::decrement)
+                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+        }
     }
     else
         return _errorhandler();

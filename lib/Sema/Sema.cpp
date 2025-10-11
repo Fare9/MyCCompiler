@@ -105,6 +105,28 @@ AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
     return Context.createExpression<AssignmentOperator>(Loc, left, right);
 }
 
+PrefixOperator* Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr* expr) {
+    if (!avoid_errors) {
+        if (expr->getKind() != Expr::Ek_Var) {
+            Diags.report(Loc, diag::err_incorrect_lvalue);
+            return nullptr;
+        }
+    }
+
+    return Context.createExpression<PrefixOperator>(Loc, Kind, expr);
+}
+
+PostfixOperator* Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr* expr) {
+    if (!avoid_errors) {
+        if (expr->getKind() != Expr::Ek_Var) {
+            Diags.report(Loc, diag::err_incorrect_lvalue);
+            return nullptr;
+        }
+    }
+
+    return Context.createExpression<PostfixOperator>(Loc, Kind, expr);
+}
+
 Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     // Look up the variable in current scope
     if (CurrentScope) {

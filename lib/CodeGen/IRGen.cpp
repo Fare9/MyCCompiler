@@ -299,6 +299,71 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function * IRFu
                 return result;
             }
 
+            break;
+        }
+        case Expr::Ek_PrefixOperator: {
+            const auto& PrefixOp = dynamic_cast<const PrefixOperator&>(Expr);
+
+            // Get the variable being operated on
+            ir::Value* var = generateExpression(*PrefixOp.getExpr(), IRFunc);
+            auto* one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+
+            ir::BinaryOp* increment_instruction = nullptr;
+
+            // For prefix operators, we first update the variable, then return its new value
+            switch (PrefixOp.getOperatorKind()) {
+                case PrefixOperator::POK_PreIncrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
+                                                              one, ir::BinaryOp::Add);
+                    break;
+                case PrefixOperator::POK_PreDecrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
+                                                              one, ir::BinaryOp::Sub);
+                    break;
+            }
+
+            if (IRFunc != nullptr && increment_instruction != nullptr) {
+                IRFunc->add_instruction(increment_instruction);
+                // Copy the result back to the variable
+                IRFunc->add_instruction(Ctx.createCopy(increment_instruction->getDestination(), var));
+            }
+
+            return var; // Return the updated variable
+        }
+        case Expr::Ek_PostfixOperator: {
+            const auto& PostfixOp = dynamic_cast<const PostfixOperator&>(Expr);
+
+            // Get the variable being operated on
+            ir::Value* var = generateExpression(*PostfixOp.getExpr(), IRFunc);
+            auto* one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+
+            // For postfix operators, we save the old value, update the variable, then return the old value
+            auto* old_value = Ctx.createReg();
+            ir::BinaryOp* increment_instruction = nullptr;
+
+            if (IRFunc != nullptr) {
+                // Save the current value
+                IRFunc->add_instruction(Ctx.createCopy(var, old_value));
+            }
+
+            switch (PostfixOp.getOperatorKind()) {
+                case PostfixOperator::POK_PostIncrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
+                                                              one, ir::BinaryOp::Add);
+                    break;
+                case PostfixOperator::POK_PostDecrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
+                                                              one, ir::BinaryOp::Sub);
+                    break;
+            }
+
+            if (IRFunc != nullptr && increment_instruction != nullptr) {
+                IRFunc->add_instruction(increment_instruction);
+                // Copy the result back to the variable
+                IRFunc->add_instruction(Ctx.createCopy(increment_instruction->getDestination(), var));
+            }
+
+            return old_value; // Return the old value (before increment/decrement)
         }
     }
     

@@ -71,6 +71,10 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
             return printBinaryOperator(dynamic_cast<const BinaryOperator*>(expr), indent);
         case Expr::Ek_AssignmentOperator:
             return printAssignmentOperator(dynamic_cast<const AssignmentOperator*>(expr), indent);
+        case Expr::Ek_PrefixOperator:
+            return printPrefixOperator(dynamic_cast<const PrefixOperator*>(expr), indent);
+        case Expr::Ek_PostfixOperator:
+            return printPostfixOperator(dynamic_cast<const PostfixOperator*>(expr), indent);
     }
     return getIndent(indent) + "Unknown Expression\n";
 }
@@ -212,6 +216,38 @@ std::string ASTPrinter::printAssignmentOperator(const AssignmentOperator* expr, 
     output += print(expr->getLeft(), indent + 2);
     output += getIndent(indent + 1) + "Right:\n";
     output += print(expr->getRight(), indent + 2);
+    return output;
+}
+
+std::string ASTPrinter::printPrefixOperator(const PrefixOperator* expr, int indent) {
+    std::string kind_prefix_operator;
+    switch (expr->getOperatorKind()) {
+        case PrefixOperator::POK_PreIncrement:
+            kind_prefix_operator = "PreIncrement";
+            break;
+        case PrefixOperator::POK_PreDecrement:
+            kind_prefix_operator = "PreDecrement";
+            break;
+    }
+
+    std::string output = getIndent(indent) + "PrefixOperator: " + kind_prefix_operator + "\n";
+    output += print(expr->getExpr(), indent + 1);
+    return output;
+}
+
+std::string ASTPrinter::printPostfixOperator(const PostfixOperator* expr, int indent) {
+    std::string kind_postfix_operator;
+    switch (expr->getOperatorKind()) {
+        case PostfixOperator::POK_PostIncrement:
+            kind_postfix_operator = "PostIncrement";
+            break;
+        case PostfixOperator::POK_PostDecrement:
+            kind_postfix_operator = "PostDecrement";
+            break;
+    }
+
+    std::string output = getIndent(indent) + "PostfixOperator: " + kind_postfix_operator + "\n";
+    output += print(expr->getExpr(), indent + 1);
     return output;
 }
 
