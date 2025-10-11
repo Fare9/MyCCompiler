@@ -137,6 +137,7 @@ void Lexer::next(Token &Result) {
         CASE('[', tok::l_square); // [ character
         CASE(']', tok::r_square); // ] character
         CASE('~', tok::tilde);    // ~ character
+        CASE('?', tok::interrogation);
 #undef CASE
         case '+':
             if (*(CurPtr + 1) == '+')

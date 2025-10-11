@@ -66,6 +66,8 @@ PUNCTUATOR(compoundor, "|=")
 PUNCTUATOR(compoundxor, "^=")
 PUNCTUATOR(compoundshl, "<<=")
 PUNCTUATOR(compoundshr, ">>=")
+// Chapter 6
+PUNCTUATOR(interrogation, "?")
 
 /// keywords used during the program
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'
