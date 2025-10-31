@@ -132,19 +132,20 @@ bool Parser::parseStatement(BlockItems& Items) {
         if (parseReturnStmt(Items))
             return true;
         return false;
-    } else if (Tok.is(tok::semi)) {
+    }
+    if (Tok.is(tok::semi)) {
         Actions.actOnNullStatement(Items, Tok.getLocation());
         consume(tok::semi);
         return false;
-    } else if (Tok.is(tok::kw_if)) {
+    }
+    if (Tok.is(tok::kw_if)) {
         if (parseIfStmt(Items))
             return true;
         return false;
-    } else {
-        if (parseExprStmt(Items))
-            return true;
-        return false;
     }
+    if (parseExprStmt(Items))
+        return true;
+    return false;
 
     return false;
 }
@@ -325,6 +326,7 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             tok::compoundshr,
             // Chapter 6
             tok::interrogation)) {
+        // Compound statements
         if (Tok.isOneOf(tok::compoundadd,
             tok::compoundsub,
             tok::compoundmul,
@@ -375,6 +377,7 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
                 _errorhandler();
 
         }
+        // Assignment operator
         else if (Tok.is(tok::equal)) {
             BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
             int precedence = binary_operators_precedence[Kind];
@@ -401,11 +404,14 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             advance(); // consume '?'
 
             Expr * middle, * right;
+            // first we parse a middle expression
             parseMiddle(middle);
+            // then we parse the right one after ":"
             parseExpr(right, precedence);
 
             left = Actions.actOnTernaryOperator(Loc, left, middle, right);
         }
+        // any other binary operator
         else
         {
             BinaryOperator::BinaryOpKind Kind = parseBinOp(Tok);
@@ -440,11 +446,12 @@ bool Parser::parseFactor(Expr *&E) {
         }
         return false;
     };
-
+    // the factor is an integer
     if (Tok.is(tok::integer_literal)) {
         E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
         advance();
     }
+    // the factor is an identifier (it can contain postfix operator)
     else if (Tok.is(tok::identifier)) {
         E = Actions.actOnIdentifier(Tok.getLocation(), Tok.getIdentifier());
         if (!E)
@@ -462,6 +469,7 @@ bool Parser::parseFactor(Expr *&E) {
                 E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
         }
     }
+    // Look for unary operators or for prefix operators
     else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
@@ -482,6 +490,7 @@ bool Parser::parseFactor(Expr *&E) {
         else if (OpKind == tok::decrement)
             E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreDecrement, internalExpr);
     }
+    // Parentheses expression (<expr>)
     else if (Tok.is(tok::l_paren)) {
         advance();
         if (parseExpr(E, 0))
