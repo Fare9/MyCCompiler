@@ -427,6 +427,34 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
 
             return old_value; // Return the old value (before increment/decrement)
         }
+    case Expr::Ek_ConditionalOperator:
+        {
+            const auto& cond_expr = dynamic_cast<const ConditionalExpr&>(Expr);
+            // Results that will be returned
+            ir::Value* Result, *temp1, *temp2;
+            // labels
+            auto * e2_label = Ctx.createNewLabel("e2_label");
+            auto * end_label = Ctx.createNewLabel("end_label");
+            // Result must be a register
+            Result = Ctx.createReg();
+
+            // first generate the conditional statement
+            auto * cond_result = generateExpression(*cond_expr.getCondition(), IRFunc);
+            // If met, jump to the e2
+            IRFunc->add_instruction(Ctx.createJZ(cond_result, e2_label));
+            // now we generate the code for the first statement, and obtain
+            // the result
+            temp1 = generateExpression(*cond_expr.getLeft(), IRFunc);
+            IRFunc->add_instruction(Ctx.createMov(temp1, Result));
+            IRFunc->add_instruction(Ctx.createJump(end_label));
+            // now we generate the second statement
+            IRFunc->add_instruction(e2_label);
+            temp2 = generateExpression(*cond_expr.getRight(), IRFunc);
+            IRFunc->add_instruction(Ctx.createMov(temp2, Result));
+            // finally the end label
+            IRFunc->add_instruction(end_label);
+            return Result;
+        }
     }
 
     return nullptr; // Should not reach here
