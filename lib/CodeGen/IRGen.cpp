@@ -78,8 +78,8 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
             // generate conditional code
             auto result = generateExpression(*IfStmt.getCondition(), IRFunc);
             // generate labels
-            auto * else_label = Ctx.createNewLabel("else_label");
-            auto * end_label = Ctx.createNewLabel("end_label");
+            auto * else_label = Ctx.getOrCreateLabel("else_label");
+            auto * end_label = Ctx.getOrCreateLabel("end_label");
             if (IfStmt.getElseSt() != nullptr)
                 IRFunc->add_instruction(Ctx.createJZ(result, else_label));
             else
@@ -97,6 +97,20 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
             // Now we generate the END label
             IRFunc->add_instruction(end_label);
 
+            break;
+        }
+    case Statement::SK_Label:
+        {
+            const auto& Label = dynamic_cast<const LabelStatement&>(Stmt);
+            const auto ILabel = Ctx.getOrCreateLabel(Label.getLabel().str(), true);
+            IRFunc->add_instruction(ILabel);
+            break;
+        }
+    case Statement::SK_Goto:
+        {
+            const auto& Goto = dynamic_cast<const GotoStatement&>(Stmt);
+            const auto ILabel = Ctx.getOrCreateLabel(Goto.getLabel().str(), true);
+            IRFunc->add_instruction(Ctx.createJump(ILabel));
             break;
         }
     case Statement::SK_Null:
@@ -269,8 +283,8 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
             // Short-Circuiting for && instruction
             if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_And)
             {
-                auto* false_label = Ctx.createNewLabel("false_label");
-                auto* end_label = Ctx.createNewLabel("end_label");
+                auto* false_label = Ctx.getOrCreateLabel("false_label");
+                auto* end_label = Ctx.getOrCreateLabel("end_label");
                 auto* result = Ctx.createReg();
                 auto* temp_left = Ctx.createReg();
                 auto* temp_right = Ctx.createReg();
@@ -312,8 +326,8 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
             // Short-circuiting for || instruction
             if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_Or)
             {
-                auto* true_label = Ctx.createNewLabel("true_label");
-                auto* end_label = Ctx.createNewLabel("end_label");
+                auto* true_label = Ctx.getOrCreateLabel("true_label");
+                auto* end_label = Ctx.getOrCreateLabel("end_label");
                 auto* result = Ctx.createReg();
                 auto* temp_left = Ctx.createReg();
                 auto* temp_right = Ctx.createReg();
@@ -433,8 +447,8 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
             // Results that will be returned
             ir::Value* Result, *temp1, *temp2;
             // labels
-            auto * e2_label = Ctx.createNewLabel("e2_label");
-            auto * end_label = Ctx.createNewLabel("end_label");
+            auto * e2_label = Ctx.getOrCreateLabel("e2_label");
+            auto * end_label = Ctx.getOrCreateLabel("end_label");
             // Result must be a register
             Result = Ctx.createReg();
 

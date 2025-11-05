@@ -102,6 +102,7 @@ class Parser {
     bool parseReturnStmt(BlockItems& Items);
     bool parseExprStmt(BlockItems& Items);
     bool parseIfStmt(BlockItems& Items);
+    bool parseGotoStmt(BlockItems& Items);
 
     bool parseExpr(Expr *&E, int min_precedence = 0);
     bool parseMiddle(Expr *&Middle);

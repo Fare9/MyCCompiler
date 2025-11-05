@@ -92,6 +92,17 @@ namespace charinfo
 
 } //! namespace charinfo
 
+void Lexer::peek(Token &Result) {
+    // Save current position
+    const char *SavedCurPtr = CurPtr;
+
+    // Get next token
+    next(Result);
+
+    // Restore position
+    CurPtr = SavedCurPtr;
+}
+
 void Lexer::next(Token &Result) {
     // move current pointer while is not a white space or the buffer is not empty
     while (*CurPtr && charinfo::isWhitespace(*CurPtr)) {

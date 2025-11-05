@@ -83,6 +83,10 @@ public:
     /// @param Result
     void next(Token &Result);
 
+    /// @brief Peek at the next token without consuming it
+    /// @param Result token to store the peeked result
+    void peek(Token &Result);
+
     /// Get source code buffer.
     [[nodiscard]] StringRef getBuffer() const
     {

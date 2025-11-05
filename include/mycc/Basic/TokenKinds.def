@@ -79,6 +79,7 @@ KEYWORD(while, KEYALL)
 KEYWORD(for, KEYALL)
 KEYWORD(return, KEYALL)
 KEYWORD(sizeof, KEYALL)         // Added sizeof operator
+KEYWORD(goto, KEYALL)
 
 #undef KEYWORD
 #undef PUNCTUATOR

@@ -21,8 +21,25 @@ class Token {
     // a string version of the token
     std::string string_version;
 
-
 public:
+    // Default constructor
+    Token() = default;
+
+    // Copy constructor
+    Token(const Token& Tok) = default;
+
+    // Copy assignment operator
+    Token& operator=(const Token& Tok) = default;
+
+    // Move constructor
+    Token(Token&& Tok) noexcept = default;
+
+    // Move assignment operator
+    Token& operator=(Token&& Tok) noexcept = default;
+
+    // Destructor
+    ~Token() = default;
+
     /// @return TokenKind value for the current token
     [[nodiscard]] tok::TokenKind getKind() const {
         return Kind;
@@ -101,8 +118,6 @@ public:
         string_version += "]";
         return string_version;
     }
-
-
 };
 
 }

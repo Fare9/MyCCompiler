@@ -4,6 +4,25 @@
 
 using namespace mycc;
 
+void Sema::enterFunction()
+{
+    FunctionLabels.clear();
+    GotoLabels.clear();
+}
+
+void Sema::exitFunction()
+{
+    // Check that all goto labels are defined in the function
+    if (!avoid_errors) {
+        for (const auto& label : GotoLabels) {
+            if (!FunctionLabels.contains(label)) {
+                Diags.report(SMLoc(), diag::err_undefined_label, label.str());
+                exit(1);
+            }
+        }
+    }
+}
+
 void Sema::enterScope()
 {
     CurrentScope = new Scope(CurrentScope);
@@ -81,6 +100,26 @@ void Sema::actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr) {
 
 void Sema::actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
     Items.push_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
+}
+
+void Sema::actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
+{
+    if (!avoid_errors)
+    {
+        if (FunctionLabels.contains(Label))
+        {
+            Diags.report(Loc, diag::err_existing_label, Label.str());
+            exit(1);
+        }
+    }
+    FunctionLabels.insert(Label);
+    Items.push_back(Context.createStatement<LabelStatement>(Label));
+}
+
+void Sema::actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
+{
+    GotoLabels.insert(Label);
+    Items.push_back(Context.createStatement<GotoStatement>(Label));
 }
 
 IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {

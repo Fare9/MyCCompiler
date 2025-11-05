@@ -41,7 +41,7 @@ std::string ASTPrinter::print(const Statement* statement) {
 
 std::string ASTPrinter::print(const Statement* statement, int indent) {
     if (!statement) return getIndent(indent) + "null\n";
-    
+
     switch (statement->getKind()) {
         case Statement::SK_Return:
             return printReturnStatement(dynamic_cast<const ReturnStatement*>(statement), indent);
@@ -51,6 +51,10 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printNullStatement(dynamic_cast<const NullStatement*>(statement), indent);
         case Statement::SK_If:
             return printIfStatement(dynamic_cast<const IfStatement*>(statement), indent);
+        case Statement::SK_Label:
+            return printLabelStatement(dynamic_cast<const LabelStatement*>(statement), indent);
+        case Statement::SK_Goto:
+            return printGotoStatement(dynamic_cast<const GotoStatement*>(statement), indent);
     }
     return getIndent(indent) + "Unknown Statement\n";
 }
@@ -292,6 +296,16 @@ std::string ASTPrinter::printIfStatement(const IfStatement* stmt, int indent) {
     }
 
     return output;
+}
+
+std::string ASTPrinter::printLabelStatement(const LabelStatement* stmt, int indent)
+{
+    return getIndent(indent) + "LabelStatement: " + stmt->getLabel().str() + "\n";
+}
+
+std::string ASTPrinter::printGotoStatement(const GotoStatement* stmt, int indent)
+{
+    return getIndent(indent) + "GotoStatement: " + stmt->getLabel().str() + "\n";
 }
 
 std::string ASTPrinter::printConditionalExpr(const ConditionalExpr* expr, int indent) {

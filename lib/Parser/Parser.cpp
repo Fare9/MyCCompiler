@@ -48,6 +48,8 @@ bool Parser::parseFunction(Function *&F) {
 
     F = Actions.actOnFunctionDeclaration(Tok.getLocation(), Tok.getIdentifier());
 
+    Actions.enterFunction();
+
     // advance to next token
     advance();
 
@@ -71,6 +73,8 @@ bool Parser::parseFunction(Function *&F) {
     if (consume(tok::r_brace))
         return _errorhandler();
     F->setBody(body);
+
+    Actions.exitFunction();
 
     return true;
 }
@@ -129,9 +133,7 @@ bool Parser::parseDeclaration(BlockItems& Items) {
 bool Parser::parseStatement(BlockItems& Items) {
 
     if (Tok.is(tok::kw_return)) {
-        if (parseReturnStmt(Items))
-            return true;
-        return false;
+        return parseReturnStmt(Items);
     }
     if (Tok.is(tok::semi)) {
         Actions.actOnNullStatement(Items, Tok.getLocation());
@@ -139,9 +141,43 @@ bool Parser::parseStatement(BlockItems& Items) {
         return false;
     }
     if (Tok.is(tok::kw_if)) {
-        if (parseIfStmt(Items))
-            return true;
-        return false;
+        return parseIfStmt(Items);
+    }
+    if (Tok.is(tok::kw_goto))
+    {
+        return parseGotoStmt(Items);
+    }
+    if (Tok.is(tok::identifier))
+    {
+        // Peek ahead to see if the next token is a colon
+        Token nextTok;
+        Lex.peek(nextTok);
+
+        // check if we have `:`, in that case, there's a label
+        if (nextTok.is(tok::colon))
+        {
+            StringRef labelName = Tok.getIdentifier();
+            SMLoc loc = Tok.getLocation();
+            advance(); // consume identifier
+            advance(); // consume colon
+            Actions.actOnLabelStatement(Items, loc, labelName);
+
+            if (Tok.is(tok::kw_int))
+            {
+                getDiagnostics().report(Tok.getLocation(), diag::err_expected_statement_after_label);
+                return true;
+            }
+            if (Tok.is(tok::r_brace))
+            {
+                getDiagnostics().report(Tok.getLocation(), diag::err_label_cannot_end_block);
+                return true;
+            }
+
+            return false;
+        }
+
+        // if it is not a label, it's a regular identifier, so parse it as an expression
+        // (fall through to parseExprStmt)
     }
     if (parseExprStmt(Items))
         return true;
@@ -231,6 +267,26 @@ bool Parser::parseIfStmt(BlockItems& Items) {
     Statement * else_st = else_sts.empty() ? nullptr : std::get<Statement*>(else_sts.back());
 
     Actions.actOnIfStatement(Items, Loc, Cond, then_st, else_st);
+    return false;
+}
+
+bool Parser::parseGotoStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+    advance();
+
+    if (expect(tok::identifier))
+        return true;
+    // get the identifier
+    StringRef Identifier = Tok.getIdentifier();
+    // consume the identifier token
+    advance();
+    // generate a Goto statement
+    Actions.actOnGotoStatement(Items, Loc, Identifier);
+
+    if (consume(tok::semi))
+        return true;
+
     return false;
 }
 

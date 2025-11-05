@@ -12,6 +12,7 @@
 #include <fmt/core.h>
 
 #include "AST.hpp"
+#include "AST.hpp"
 
 namespace mycc {
 
@@ -35,6 +36,8 @@ public:
         SK_Return,
         SK_Expression,
         SK_If,
+        SK_Label,
+        SK_Goto,
         SK_Null,
     };
 private:
@@ -152,6 +155,44 @@ public:
 
     static bool classof(const Statement * S) {
         return S->getKind() == SK_If;
+    }
+};
+
+class LabelStatement : public Statement
+{
+    StringRef Label;
+public:
+    LabelStatement(StringRef Label) :
+        Statement(SK_Label), Label(Label) {}
+
+    ~LabelStatement() override = default;
+
+    StringRef getLabel() const
+    {
+        return Label;
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_Label;
+    }
+};
+
+class GotoStatement : public Statement
+{
+    StringRef Label;
+public:
+    GotoStatement(StringRef Label) :
+        Statement(SK_Goto), Label(Label) {}
+
+    ~GotoStatement() override = default;
+
+    StringRef getLabel() const
+    {
+        return Label;
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_Goto;
     }
 };
 
