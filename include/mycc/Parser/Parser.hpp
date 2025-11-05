@@ -101,11 +101,16 @@ class Parser {
     bool parseStatement(BlockItems& Items);
     bool parseReturnStmt(BlockItems& Items);
     bool parseExprStmt(BlockItems& Items);
+    bool parseIfStmt(BlockItems& Items);
+    bool parseGotoStmt(BlockItems& Items);
 
     bool parseExpr(Expr *&E, int min_precedence = 0);
+    bool parseMiddle(Expr *&Middle);
     bool parseFactor(Expr *&E);
 
+
     static BinaryOperator::BinaryOpKind parseBinOp(Token& Tok);
+    static int get_operator_kind_by_expr(Expr * expr);
 public:
     Parser(Lexer &Lex, Sema &Actions, ASTContext &Context);
 

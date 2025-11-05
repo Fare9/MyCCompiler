@@ -9,6 +9,10 @@
 #include <variant>
 #include <vector>
 #include <optional>
+#include <fmt/core.h>
+
+#include "AST.hpp"
+#include "AST.hpp"
 
 namespace mycc {
 
@@ -31,6 +35,9 @@ public:
     enum StmtKind {
         SK_Return,
         SK_Expression,
+        SK_If,
+        SK_Label,
+        SK_Goto,
         SK_Null,
     };
 private:
@@ -56,6 +63,7 @@ public:
         Ek_AssignmentOperator,
         Ek_PrefixOperator,
         Ek_PostfixOperator,
+        Ek_ConditionalOperator,
     };
 private:
     const ExprKind Kind;
@@ -105,6 +113,86 @@ public:
 
     static bool classof(const Statement * S) {
         return S->getKind() == SK_Expression;
+    }
+};
+
+class IfStatement : public Statement {
+    Expr * condition;
+    // mandatory in if
+    Statement * then_st;
+    // optional statement
+    Statement * else_st;
+public:
+    IfStatement(Expr * condition, Statement * then_st) :
+        Statement(SK_If), condition(condition), then_st(then_st) {
+    }
+
+    IfStatement(Expr * condition, Statement * then_st, Statement * else_st) :
+    Statement(SK_If), condition(condition), then_st(then_st), else_st(else_st){
+    }
+
+    ~IfStatement() override = default;
+
+    Expr * getCondition() const
+    {
+        return condition;
+    }
+
+    Statement * getThenSt() const
+    {
+        return then_st;
+    }
+
+    Statement * getElseSt() const
+    {
+        return else_st;
+    }
+
+    void setElseSt(Statement * st)
+    {
+        this->else_st = st;
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_If;
+    }
+};
+
+class LabelStatement : public Statement
+{
+    StringRef Label;
+public:
+    LabelStatement(StringRef Label) :
+        Statement(SK_Label), Label(Label) {}
+
+    ~LabelStatement() override = default;
+
+    StringRef getLabel() const
+    {
+        return Label;
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_Label;
+    }
+};
+
+class GotoStatement : public Statement
+{
+    StringRef Label;
+public:
+    GotoStatement(StringRef Label) :
+        Statement(SK_Goto), Label(Label) {}
+
+    ~GotoStatement() override = default;
+
+    StringRef getLabel() const
+    {
+        return Label;
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_Goto;
     }
 };
 
@@ -226,6 +314,11 @@ public:
         // these values, or to create a variant
         // of two possible values
         Bok_Assign,
+        // Chapter 6
+        // Same as Assign, it is not a binary operation
+        // but we will add it for not moving out these
+        // values
+        Bok_Interrogation,
         BoK_None
     };
 private:
@@ -347,6 +440,35 @@ public:
 
     static bool classof(const Expr *E) {
         return E->getKind() == Ek_PostfixOperator;
+    }
+};
+
+class ConditionalExpr : public Expr {
+    Expr * condition;
+    Expr * left;
+    Expr * right;
+
+public:
+
+    ConditionalExpr(Expr * condition, Expr * left, Expr * right) :
+        Expr(Ek_ConditionalOperator), condition(condition), left(left), right(right) {}
+
+    ~ConditionalExpr() override = default;
+
+    Expr * getCondition() const {
+        return condition;
+    }
+
+    Expr * getLeft() const {
+        return left;
+    }
+
+    Expr * getRight() const {
+        return right;
+    }
+
+    static bool classof(const Expr *E) {
+        return E->getKind() == Ek_ConditionalOperator;
     }
 };
 

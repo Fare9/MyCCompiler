@@ -24,6 +24,9 @@ private:
     static std::string printReturnStatement(const ReturnStatement* stmt, int indent);
     static std::string printExpressionStatement(const ExpressionStatement* stmt, int indent);
     static std::string printNullStatement(const NullStatement* stmt, int indent);
+    static std::string printIfStatement(const IfStatement* stmt, int indent);
+    static std::string printLabelStatement(const LabelStatement* stmt, int indent);
+    static std::string printGotoStatement(const GotoStatement* stmt, int indent);
     static std::string printIntegerLiteral(const IntegerLiteral* expr, int indent);
     static std::string printVar(const Var* expr, int indent);
     static std::string printUnaryOperator(const UnaryOperator* expr, int indent);
@@ -31,6 +34,7 @@ private:
     static std::string printAssignmentOperator(const AssignmentOperator* expr, int indent);
     static std::string printPrefixOperator(const PrefixOperator* expr, int indent);
     static std::string printPostfixOperator(const PostfixOperator* expr, int indent);
+    static std::string printConditionalExpr(const ConditionalExpr* expr, int indent);
     static std::string printDeclaration(const Declaration* decl, int indent);
     
     static std::string getIndent(int level);

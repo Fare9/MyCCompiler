@@ -66,6 +66,8 @@ PUNCTUATOR(compoundor, "|=")
 PUNCTUATOR(compoundxor, "^=")
 PUNCTUATOR(compoundshl, "<<=")
 PUNCTUATOR(compoundshr, ">>=")
+// Chapter 6
+PUNCTUATOR(interrogation, "?")
 
 /// keywords used during the program
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'
@@ -77,6 +79,7 @@ KEYWORD(while, KEYALL)
 KEYWORD(for, KEYALL)
 KEYWORD(return, KEYALL)
 KEYWORD(sizeof, KEYALL)         // Added sizeof operator
+KEYWORD(goto, KEYALL)
 
 #undef KEYWORD
 #undef PUNCTUATOR

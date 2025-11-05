@@ -11,6 +11,7 @@
 #include <ranges>
 #include <string>
 #include <unordered_map>
+#include <iostream>
 
 #include "SimpleIR.hpp"
 
@@ -719,6 +720,7 @@ public:
 
 class Context {
     StringMap<VarOp *> Variables;
+    std::unordered_map<std::string, Label *> Labels;
     std::unordered_map<std::int64_t, Int*> all_integer_values;
     std::vector<std::unique_ptr<Value>> Values;
     unsigned NextRegID = 0;
@@ -732,9 +734,15 @@ public:
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
-    Label* createNewLabel(std::string name) {
-        auto* label = new Label(std::move(name) + "_" + std::to_string(NextRegID++));
+    Label* getOrCreateLabel(std::string name, bool isUserDefined = false) {
+        if (isUserDefined && Labels.contains(name))
+            return Labels[name];
+        // Only append unique ID for auto-generated labels
+        // User-defined labels are already verified to be unique by semantic analysis
+        std::string labelName = isUserDefined ? name : (name + "_" + std::to_string(LabelNextID++));
+        auto* label = new Label(labelName);
         Values.emplace_back(label);
+        Labels[name] = label;
         return label;
     }
 

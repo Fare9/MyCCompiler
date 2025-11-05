@@ -7,6 +7,8 @@
 #include "llvm/ADT/StringMap.h"
 #include <vector>
 #include <string>
+#include <set>
+#include <map>
 
 namespace mycc {
 class Sema {
@@ -22,6 +24,11 @@ class Sema {
 
     // Counter for generating unique variable names
     unsigned int VariableCounter;
+
+    // Set that contains for a method the labels
+    std::set<StringRef> FunctionLabels;
+    // Set that contains all the jumped labels by Goto
+    std::set<StringRef> GotoLabels;
 
     // Helper methods for variable name management
     std::string generateUniqueVarName(StringRef originalName);
@@ -40,6 +47,8 @@ public:
 
     void initialize();
 
+    void enterFunction();
+    void exitFunction();
     void enterScope();
     void exitScope();
 
@@ -51,6 +60,9 @@ public:
     void actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal);
     void actOnNullStatement(BlockItems& Items, SMLoc Loc);
     void actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr);
+    void actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st);
+    void actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
+    void actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
 
     IntegerLiteral* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
     UnaryOperator* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr);
@@ -59,6 +71,7 @@ public:
     PrefixOperator* actOnPrefixOperator(SMLoc, PrefixOperator::PrefixOpKind Kind, Expr* expr);
     PostfixOperator* actOnPostfixOperator(SMLoc, PostfixOperator::PostfixOpKind Kind, Expr* expr);
     Var* actOnIdentifier(SMLoc, StringRef Name);
+    ConditionalExpr * actOnTernaryOperator(SMLoc, Expr* left, Expr* middle, Expr* right);
 };
 
 class EnterDeclScope {
