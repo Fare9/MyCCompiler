@@ -51,6 +51,8 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printNullStatement(dynamic_cast<const NullStatement*>(statement), indent);
         case Statement::SK_If:
             return printIfStatement(dynamic_cast<const IfStatement*>(statement), indent);
+        case Statement::SK_Compound:
+            return printCompoundStatement(dynamic_cast<const CompoundStatement*>(statement), indent);
         case Statement::SK_Label:
             return printLabelStatement(dynamic_cast<const LabelStatement*>(statement), indent);
         case Statement::SK_Goto:
@@ -293,6 +295,21 @@ std::string ASTPrinter::printIfStatement(const IfStatement* stmt, int indent) {
     if (stmt->getElseSt()) {
         output += getIndent(indent + 1) + "Else:\n";
         output += print(stmt->getElseSt(), indent + 2);
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printCompoundStatement(const CompoundStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "CompoundStatement\n";
+
+    for (const auto& item : *stmt) {
+        if (std::holds_alternative<Statement*>(item)) {
+            output += print(std::get<Statement*>(item), indent + 1);
+        } else if (std::holds_alternative<Declaration*>(item)) {
+            output += print(std::get<Declaration*>(item), indent + 1);
+        }
     }
 
     return output;

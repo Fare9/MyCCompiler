@@ -61,6 +61,7 @@ public:
     void actOnNullStatement(BlockItems& Items, SMLoc Loc);
     void actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr);
     void actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st);
+    void actOnCompoundStatement(BlockItems& Items, SMLoc Loc, BlockItems& compoundStatement);
     void actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
     void actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
 

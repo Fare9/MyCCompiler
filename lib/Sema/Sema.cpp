@@ -102,6 +102,10 @@ void Sema::actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement 
     Items.push_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
 }
 
+void Sema::actOnCompoundStatement(BlockItems& Items, SMLoc Loc, BlockItems& compoundStatement) {
+    Items.push_back(Context.createStatement<CompoundStatement>(compoundStatement));
+}
+
 void Sema::actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
 {
     if (!avoid_errors)

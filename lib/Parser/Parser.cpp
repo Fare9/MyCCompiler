@@ -143,6 +143,10 @@ bool Parser::parseStatement(BlockItems& Items) {
     if (Tok.is(tok::kw_if)) {
         return parseIfStmt(Items);
     }
+    if (Tok.is(tok::l_brace))
+    {
+        return parseCompoundStmt(Items);
+    }
     if (Tok.is(tok::kw_goto))
     {
         return parseGotoStmt(Items);
@@ -181,8 +185,6 @@ bool Parser::parseStatement(BlockItems& Items) {
     }
     if (parseExprStmt(Items))
         return true;
-    return false;
-
     return false;
 }
 
@@ -237,11 +239,10 @@ bool Parser::parseIfStmt(BlockItems& Items) {
     // now consume the statements inside the then
     if (Tok.is(tok::l_brace)) {
         advance();
-        while (!(Tok.is(tok::r_brace))) {
-            if (parseStatement(then_sts))
-                return true;
-        }
-        advance();
+        if (parseBlock(then_sts))
+            return true;
+        if (consume(tok::r_brace))
+            return true;
     } else {
         if (parseStatement(then_sts))
             return true;
@@ -252,11 +253,10 @@ bool Parser::parseIfStmt(BlockItems& Items) {
         advance();
         if (Tok.is(tok::l_brace)) {
             advance();
-            while (!(Tok.is(tok::r_brace))) {
-                if (parseStatement(else_sts))
-                    return true;
-            }
-            advance();
+            if (parseBlock(else_sts))
+                return true;
+            if (consume(tok::r_brace))
+                return true;
         } else {
             if (parseStatement(else_sts))
                 return true;
@@ -268,6 +268,33 @@ bool Parser::parseIfStmt(BlockItems& Items) {
 
     Actions.actOnIfStatement(Items, Loc, Cond, then_st, else_st);
     return false;
+}
+
+bool Parser::parseCompoundStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+
+    if (consume(tok::l_brace))
+        return true;
+
+    Actions.enterScope();
+
+    bool result = [&]() {
+        BlockItems compound_stmts;
+
+        if (parseBlock(compound_stmts))
+            return true;
+
+        if (consume(tok::r_brace))
+            return true;
+
+        Actions.actOnCompoundStatement(Items, Loc, compound_stmts);
+        return false;
+    }();
+
+    Actions.exitScope();
+
+    return result;
 }
 
 bool Parser::parseGotoStmt(BlockItems& Items)
