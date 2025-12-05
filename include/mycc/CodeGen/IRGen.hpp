@@ -20,7 +20,8 @@ public:
 private:
     // Convert AST Function to IR Function
     ir::Function* generateFunction(const Function& ASTFunc);
-    
+
+    bool generateBlockItem(const BlockItem& Item, ir::Function* IRFunc);
     // Convert AST Statement to IR Instructions
     void generateStatement(const Statement& Stmt, ir::Function* IRFunc);
     void generateDeclaration(const Declaration& Decl, ir::Function* IRFunc);

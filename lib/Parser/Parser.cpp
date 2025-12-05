@@ -236,31 +236,16 @@ bool Parser::parseIfStmt(BlockItems& Items) {
     if (consume(tok::r_paren))
         return true;
 
-    // now consume the statements inside the then
-    if (Tok.is(tok::l_brace)) {
-        advance();
-        if (parseBlock(then_sts))
-            return true;
-        if (consume(tok::r_brace))
-            return true;
-    } else {
-        if (parseStatement(then_sts))
-            return true;
-    }
+    // Parse the then statement (handles both single statements and compound statements)
+    if (parseStatement(then_sts))
+        return true;
+
     // if there's an else statement
     if (Tok.is(tok::kw_else))
     {
         advance();
-        if (Tok.is(tok::l_brace)) {
-            advance();
-            if (parseBlock(else_sts))
-                return true;
-            if (consume(tok::r_brace))
-                return true;
-        } else {
-            if (parseStatement(else_sts))
-                return true;
-        }
+        if (parseStatement(else_sts))
+            return true;
     }
 
     Statement * then_st = then_sts.empty() ? nullptr : std::get<Statement*>(then_sts.back());
