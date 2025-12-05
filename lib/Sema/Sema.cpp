@@ -71,6 +71,9 @@ bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
 
     // Add to current scope if it exists, using original name as key
     if (CurrentScope) {
+        // We try to insert it, but another declaration exists
+        // this is an error, in the same scope (block) two variables
+        // cannot have the same name.
         if (!CurrentScope->insert(originalName, decl)) {
             if (!avoid_errors) {
                 Diags.report(Loc, diag::err_duplicate_variable_declaration, originalName.str());
@@ -110,6 +113,9 @@ void Sema::actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
 {
     if (!avoid_errors)
     {
+        // The Labels are unique for each function, we must
+        // ensure this property, throwing an error in case
+        // an existing label has been declared again.
         if (FunctionLabels.contains(Label))
         {
             Diags.report(Loc, diag::err_existing_label, Label.str());
@@ -177,6 +183,9 @@ PostfixOperator* Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixO
 Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     // Look up the variable in current scope
     if (CurrentScope) {
+        // We make a lookup by name, this lookup will traverse
+        // all the scopes from current through parents looking
+        /// for the variable.
         Declaration* decl = CurrentScope->lookup(Name);
         if (!decl) {
             if (!avoid_errors) {
@@ -204,10 +213,14 @@ std::string Sema::generateUniqueVarName(StringRef originalName) {
 }
 
 void Sema::pushVariableName(StringRef originalName, const std::string& uniqueName) {
+    // We keep unique names instead of the original ones
+    // it will be easier for later generating the intermmediate
+    // representation
     VariableNameStacks[originalName].push_back(uniqueName);
 }
 
 std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
+    // Look in the map of variable names, look for the last one.
     auto it = VariableNameStacks.find(originalName);
     if (it != VariableNameStacks.end() && !it->second.empty()) {
         return it->second.back();
@@ -216,6 +229,10 @@ std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
 }
 
 void Sema::popVariablesFromScope(const std::vector<std::string>& declaredVars) {
+    // Once we go out from a scope (a block), we have to
+    // remove all the declared variables from the variable
+    // name stacks, so we do not keep the unique generated
+    // names.
     for (const std::string& varName : declaredVars) {
         auto it = VariableNameStacks.find(varName);
         if (it != VariableNameStacks.end() && !it->second.empty()) {
