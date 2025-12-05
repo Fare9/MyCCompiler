@@ -25,6 +25,7 @@ private:
     static std::string printExpressionStatement(const ExpressionStatement* stmt, int indent);
     static std::string printNullStatement(const NullStatement* stmt, int indent);
     static std::string printIfStatement(const IfStatement* stmt, int indent);
+    static std::string printCompoundStatement(const CompoundStatement* stmt, int indent);
     static std::string printLabelStatement(const LabelStatement* stmt, int indent);
     static std::string printGotoStatement(const GotoStatement* stmt, int indent);
     static std::string printIntegerLiteral(const IntegerLiteral* expr, int indent);

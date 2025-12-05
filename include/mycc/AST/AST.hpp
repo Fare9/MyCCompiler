@@ -36,6 +36,7 @@ public:
         SK_Return,
         SK_Expression,
         SK_If,
+        SK_Compound,
         SK_Label,
         SK_Goto,
         SK_Null,
@@ -155,6 +156,50 @@ public:
 
     static bool classof(const Statement * S) {
         return S->getKind() == SK_If;
+    }
+};
+
+class CompoundStatement : public Statement
+{
+    BlockItems block;
+public:
+    CompoundStatement(BlockItems& block) :
+        Statement(SK_Compound), block(std::move(block)) {}
+
+    ~CompoundStatement() override = default;
+
+    BlockItems& getBlock()
+    {
+        return block;
+    }
+
+    const BlockItems& getBlock() const
+    {
+        return block;
+    }
+
+    BlockItem get_item(size_t i) {
+        return i >= block.size() ? std::monostate{} : block[i];
+    }
+
+    BlockItems::iterator begin() {
+        return block.begin();
+    }
+
+    BlockItems::iterator end() {
+        return block.end();
+    }
+
+    [[nodiscard]] BlockItems::const_iterator begin() const {
+        return block.begin();
+    }
+
+    [[nodiscard]] BlockItems::const_iterator end() const {
+        return block.end();
+    }
+
+    static bool classof(const Statement * S) {
+        return S->getKind() == SK_Compound;
     }
 };
 

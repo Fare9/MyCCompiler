@@ -24,19 +24,9 @@ ir::Function* IRGenerator::generateFunction(const Function& ASTFunc)
     bool containsReturn = false;
 
     // Generate IR for each statement in the function
-    for (const BlockItem Item : ASTFunc)
+    for (const BlockItem& Item : ASTFunc)
     {
-        if (std::holds_alternative<Statement*>(Item))
-        {
-            Statement* Stmt = std::get<Statement*>(Item);
-            generateStatement(*Stmt, IRFunc);
-            if (Stmt->getKind() == Statement::SK_Return && !containsReturn) containsReturn = true;
-        }
-        else if (std::holds_alternative<Declaration*>(Item))
-        {
-            Declaration* Decl = std::get<Declaration*>(Item);
-            generateDeclaration(*Decl, IRFunc);
-        }
+        containsReturn |= generateBlockItem(Item, IRFunc);
     }
 
     if (!containsReturn)
@@ -47,6 +37,23 @@ ir::Function* IRGenerator::generateFunction(const Function& ASTFunc)
     }
 
     return IRFunc;
+}
+
+bool IRGenerator::generateBlockItem(const BlockItem& Item, ir::Function* IRFunc)
+{
+    if (std::holds_alternative<Statement*>(Item))
+    {
+        Statement* Stmt = std::get<Statement*>(Item);
+        generateStatement(*Stmt, IRFunc);
+        if (Stmt->getKind() == Statement::SK_Return)
+            return true;
+    }
+    else if (std::holds_alternative<Declaration*>(Item))
+    {
+        Declaration* Decl = std::get<Declaration*>(Item);
+        generateDeclaration(*Decl, IRFunc);
+    }
+    return false;
 }
 
 void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
@@ -115,7 +122,17 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
         }
     case Statement::SK_Null:
         break;
-        // Add more statement types as needed
+    case Statement::SK_Compound:
+        {
+            const auto& Compound = dynamic_cast<const CompoundStatement&>(Stmt);
+            // managing compound statement is exactly the same
+            // as managing a function block.
+            for (const BlockItem& Item : Compound)
+            {
+                generateBlockItem(Item, IRFunc);
+            }
+            break;
+        }
     }
 }
 
