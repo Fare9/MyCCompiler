@@ -151,6 +151,14 @@ bool Parser::parseStatement(BlockItems& Items) {
     {
         return parseGotoStmt(Items);
     }
+    if (Tok.is(tok::kw_while))
+    {
+        return parseWhileStmt(Items);
+    }
+    if (Tok.is(tok::kw_do))
+    {
+        return parseDoWhileStmt(Items);
+    }
     if (Tok.is(tok::identifier))
     {
         // Peek ahead to see if the next token is a colon
@@ -299,6 +307,69 @@ bool Parser::parseGotoStmt(BlockItems& Items)
     if (consume(tok::semi))
         return true;
 
+    return false;
+}
+
+bool Parser::parseWhileStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+
+    Expr * Cond = nullptr;
+    Statement * Body = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_while))
+        return true;
+
+    // Parse expression in between parenthesis "(" <Exp> ")"
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    if (parseStatement(body_sts))
+        return true;
+
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnWhileStatement(Items, Loc, Cond, Body);
+    return false;
+}
+
+bool Parser::parseDoWhileStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+
+    Statement * Body = nullptr;
+    Expr * Cond = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_do))
+        return true;
+
+    if (parseStatement(body_sts))
+        return true;
+
+    if (consume(tok::kw_while))
+        return true;
+
+    // Consume the expression from the do/while
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnDoWhileStatement(Items, Loc, Body, Cond);
     return false;
 }
 

@@ -39,6 +39,10 @@ public:
         SK_Compound,
         SK_Label,
         SK_Goto,
+        SK_Break,
+        SK_Continue,
+        SK_While,
+        SK_DoWhile,
         SK_Null,
     };
 private:
@@ -238,6 +242,90 @@ public:
 
     static bool classof(const Statement * S) {
         return S->getKind() == SK_Goto;
+    }
+};
+
+class BreakStatement : public Statement
+{
+public:
+    BreakStatement() : Statement(SK_Break) {}
+
+    ~BreakStatement() override = default;
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_Break;
+    }
+};
+
+class ContinueStatement : public Statement
+{
+public:
+    ContinueStatement() : Statement(SK_Continue) {}
+
+    ~ContinueStatement() override = default;
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_Continue;
+    }
+};
+
+class WhileStatement : public Statement
+{
+private:
+    // condition inside of while statement
+    Expr * Condition;
+    // Body of the while condition
+    Statement * Body;
+public:
+    WhileStatement(Expr * condition, Statement * body) :
+        Statement(SK_While), Condition(condition), Body(body) {}
+
+    ~WhileStatement() override = default;
+
+    Expr * getCondition() const
+    {
+        return Condition;
+    }
+
+    Statement * getBody() const
+    {
+        return Body;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_While;
+    }
+};
+
+class DoWhileStatement : public Statement
+{
+private:
+    // Body of the do/while condition
+    Statement * Body;
+    // condition inside of while statement
+    Expr * Condition;
+public:
+    DoWhileStatement(Statement * body, Expr * condition) :
+        Statement(SK_DoWhile), Body(body), Condition(condition) {}
+
+    ~DoWhileStatement() override = default;
+
+    Statement * getBody() const
+    {
+        return Body;
+    }
+
+    Expr * getCondition() const
+    {
+        return Condition;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_DoWhile;
     }
 };
 

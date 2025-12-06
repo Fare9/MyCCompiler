@@ -245,7 +245,7 @@ public:
 class X64Instruction {
 public:
     virtual ~X64Instruction() = default;
-    
+
     virtual std::string to_string() const = 0;
 };
 

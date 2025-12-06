@@ -82,6 +82,7 @@ KEYWORD(sizeof, KEYALL)         // Added sizeof operator
 KEYWORD(goto, KEYALL)
 KEYWORD(break, KEYALL)          // For loops in chapter 8
 KEYWORD(continue, KEYALL)       // For loops in chapter 8
+KEYWORD(do, KEYALL)             // For loops in Chapter 8
 
 #undef KEYWORD
 #undef PUNCTUATOR

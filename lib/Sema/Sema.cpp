@@ -132,6 +132,16 @@ void Sema::actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
     Items.push_back(Context.createStatement<GotoStatement>(Label));
 }
 
+void Sema::actOnWhileStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *Body)
+{
+    Items.push_back(Context.createStatement<WhileStatement>(Cond, Body));
+}
+
+void Sema::actOnDoWhileStatement(BlockItems& Items, SMLoc Loc, Statement *Body, Expr *Cond)
+{
+    Items.push_back(Context.createStatement<DoWhileStatement>(Body, Cond));
+}
+
 IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     uint8_t Radix = 10;
 
