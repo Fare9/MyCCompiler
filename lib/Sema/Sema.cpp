@@ -142,6 +142,21 @@ void Sema::actOnDoWhileStatement(BlockItems& Items, SMLoc Loc, Statement *Body, 
     Items.push_back(Context.createStatement<DoWhileStatement>(Body, Cond));
 }
 
+void Sema::actOnForStatement(BlockItems& Items, SMLoc Loc, ForInit& Init, Expr *Cond, Expr *Post, Statement *Body)
+{
+    Items.push_back(Context.createStatement<ForStatement>(Init, Cond, Post, Body));
+}
+
+void Sema::actOnBreakStatement(BlockItems& Items, SMLoc Loc)
+{
+    Items.push_back(Context.createStatement<BreakStatement>());
+}
+
+void Sema::actOnContinueStatement(BlockItems& Items, SMLoc Loc)
+{
+    Items.push_back(Context.createStatement<ContinueStatement>());
+}
+
 IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     uint8_t Radix = 10;
 

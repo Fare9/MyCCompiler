@@ -66,6 +66,9 @@ public:
     void actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
     void actOnWhileStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *Body);
     void actOnDoWhileStatement(BlockItems& Items, SMLoc Loc, Statement *Body, Expr *Cond);
+    void actOnForStatement(BlockItems& Items, SMLoc Loc, ForInit& Init, Expr *Cond, Expr *Post, Statement *Body);
+    void actOnBreakStatement(BlockItems& Items, SMLoc Loc);
+    void actOnContinueStatement(BlockItems& Items, SMLoc Loc);
 
     IntegerLiteral* actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
     UnaryOperator* actOnUnaryOperator(SMLoc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr);

@@ -65,6 +65,8 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printWhileStatement(dynamic_cast<const WhileStatement*>(statement), indent);
         case Statement::SK_DoWhile:
             return printDoWhileStatement(dynamic_cast<const DoWhileStatement*>(statement), indent);
+        case Statement::SK_For:
+            return printForStatement(dynamic_cast<const ForStatement*>(statement), indent);
     }
     return getIndent(indent) + "Unknown Statement\n";
 }
@@ -382,6 +384,48 @@ std::string ASTPrinter::printDoWhileStatement(const DoWhileStatement* stmt, int 
     output += getIndent(indent + 1) + "Condition:\n";
     if (stmt->getCondition()) {
         output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printForStatement(const ForStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "ForStatement\n";
+
+    // Print init
+    output += getIndent(indent + 1) + "Init:\n";
+    const ForInit& init = stmt->getInit();
+    if (std::holds_alternative<Declaration*>(init)) {
+        output += print(std::get<Declaration*>(init), indent + 2);
+    } else if (std::holds_alternative<Expr*>(init)) {
+        output += print(std::get<Expr*>(init), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->getCondition()) {
+        output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print post
+    output += getIndent(indent + 1) + "Post:\n";
+    if (stmt->getPost()) {
+        output += print(stmt->getPost(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->getBody()) {
+        output += print(stmt->getBody(), indent + 2);
     } else {
         output += getIndent(indent + 2) + "null\n";
     }
