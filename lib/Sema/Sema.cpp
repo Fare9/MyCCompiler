@@ -14,11 +14,16 @@ void Sema::exitFunction()
 {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
-        for (const auto& label : GotoLabels) {
-            if (!FunctionLabels.contains(label)) {
-                Diags.report(SMLoc(), diag::err_undefined_label, label.str());
-                exit(1);
-            }
+        checkGotoLabelsCorrectlyPointToFunction();
+    }
+}
+
+void Sema::checkGotoLabelsCorrectlyPointToFunction()
+{
+    for (const auto& label : GotoLabels) {
+        if (!FunctionLabels.contains(label)) {
+            Diags.report(SMLoc(), diag::err_undefined_label, label.str());
+            exit(1);
         }
     }
 }
@@ -40,6 +45,121 @@ void Sema::exitScope()
     // delete current scope
     delete CurrentScope;
     CurrentScope = Parent;
+}
+
+std::string Sema::generateLoopLabel() {
+    return "loop_" + std::to_string(LoopLabelCounter++);
+}
+
+void Sema::assignLoopLabels(Function& F) {
+    // Stack holds base loop labels for nested loops
+    std::vector<std::string> loopStack;
+
+    // Traverse all items in the function body
+    for (auto& item : F) {
+        traverseBlockItem(item, loopStack);
+    }
+}
+
+void Sema::traverseBlockItem(BlockItem& item, std::vector<std::string>& loopStack) {
+    if (std::holds_alternative<Statement*>(item)) {
+        traverseStatement(std::get<Statement*>(item), loopStack);
+    }
+}
+
+void Sema::traverseStatement(Statement* stmt, std::vector<std::string>& loopStack) {
+    if (!stmt) return;
+
+    switch (stmt->getKind()) {
+        case Statement::SK_While: {
+            auto* whileStmt = static_cast<WhileStatement*>(stmt);
+            std::string baseLabel = generateLoopLabel();
+            whileStmt->set_label(baseLabel);
+
+            // Push base label onto stack
+            loopStack.push_back(baseLabel);
+
+            // Traverse body
+            traverseStatement(whileStmt->getBody(), loopStack);
+
+            // Pop from stack
+            loopStack.pop_back();
+            break;
+        }
+
+        case Statement::SK_DoWhile: {
+            auto* doWhileStmt = static_cast<DoWhileStatement*>(stmt);
+            std::string baseLabel = generateLoopLabel();
+            doWhileStmt->set_label(baseLabel);
+
+            loopStack.push_back(baseLabel);
+            traverseStatement(doWhileStmt->getBody(), loopStack);
+            loopStack.pop_back();
+            break;
+        }
+
+        case Statement::SK_For: {
+            auto* forStmt = static_cast<ForStatement*>(stmt);
+            std::string baseLabel = generateLoopLabel();
+            forStmt->set_label(baseLabel);
+
+            loopStack.push_back(baseLabel);
+            traverseStatement(forStmt->getBody(), loopStack);
+            loopStack.pop_back();
+            break;
+        }
+
+        case Statement::SK_Break: {
+            auto* breakStmt = static_cast<BreakStatement*>(stmt);
+            if (loopStack.empty()) {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_break_not_in_loop);
+                    exit(1);
+                }
+            } else {
+                // Break jumps to end of loop: loop_N_end
+                std::string targetLabel = loopStack.back() + "_end";
+                breakStmt->set_label(targetLabel);
+            }
+            break;
+        }
+
+        case Statement::SK_Continue: {
+            auto* continueStmt = static_cast<ContinueStatement*>(stmt);
+            if (loopStack.empty()) {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_continue_not_in_loop);
+                    exit(1);
+                }
+            } else {
+                // Continue jumps to start of loop: loop_N_start
+                std::string targetLabel = loopStack.back() + "_start";
+                continueStmt->set_label(targetLabel);
+            }
+            break;
+        }
+
+        case Statement::SK_If: {
+            auto* ifStmt = static_cast<IfStatement*>(stmt);
+            traverseStatement(ifStmt->getThenSt(), loopStack);
+            if (ifStmt->getElseSt()) {
+                traverseStatement(ifStmt->getElseSt(), loopStack);
+            }
+            break;
+        }
+
+        case Statement::SK_Compound: {
+            auto* compoundStmt = static_cast<CompoundStatement*>(stmt);
+            for (auto& item : *compoundStmt) {
+                traverseBlockItem(item, loopStack);
+            }
+            break;
+        }
+
+        // Other statements (Return, Expression, Null, Label, Goto) don't need processing
+        default:
+            break;
+    }
 }
 
 void Sema::initialize() {

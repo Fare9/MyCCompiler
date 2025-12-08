@@ -256,9 +256,9 @@ public:
 
     ~BreakStatement() override = default;
 
-    void set_label(std::string& label)
+    void set_label(std::string label)
     {
-        this->label = std::move(label);
+        this->label = label;
     }
 
     std::string_view get_label() const
@@ -281,9 +281,9 @@ public:
 
     ~ContinueStatement() override = default;
 
-    void set_label(std::string& label)
+    void set_label(std::string label)
     {
-        this->label = std::move(label);
+        this->label = label;
     }
 
     std::string_view get_label() const
@@ -322,9 +322,9 @@ public:
         return Body;
     }
 
-    void set_label(std::string& label)
+    void set_label(std::string label)
     {
-        this->label = std::move(label);
+        this->label = label;
     }
 
     std::string_view get_label() const
@@ -363,9 +363,9 @@ public:
         return Condition;
     }
 
-    void set_label(std::string& label)
+    void set_label(std::string label)
     {
-        this->label = std::move(label);
+        this->label = label;
     }
 
     std::string_view get_label() const
@@ -406,9 +406,9 @@ public:
 
     Statement* getBody() const { return Body; }
 
-    void set_label(std::string& label)
+    void set_label(std::string label)
     {
-        this->label = std::move(label);
+        this->label = label;
     }
 
     std::string_view get_label() const

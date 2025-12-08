@@ -30,11 +30,22 @@ class Sema {
     // Set that contains all the jumped labels by Goto
     std::set<StringRef> GotoLabels;
 
+    // Counter for generating unique loop labels
+    unsigned int LoopLabelCounter = 0;
+
     // Helper methods for variable name management
     std::string generateUniqueVarName(StringRef originalName);
     void pushVariableName(StringRef originalName, const std::string& uniqueName);
     std::string getCurrentUniqueVarName(StringRef originalName);
     void popVariablesFromScope(const std::vector<std::string>& declaredVars);
+
+    // Loop label assignment helpers
+    std::string generateLoopLabel();
+    void traverseStatement(Statement* stmt, std::vector<std::string>& loopStack);
+    void traverseBlockItem(BlockItem& item, std::vector<std::string>& loopStack);
+
+    // Final passes from Semantic Analysis
+    void checkGotoLabelsCorrectlyPointToFunction();
 
 public:
     explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context) {
@@ -51,6 +62,8 @@ public:
     void exitFunction();
     void enterScope();
     void exitScope();
+
+    void assignLoopLabels(Function& F);
 
     Program * actOnProgramDeclaration(FuncList &Funcs);
     Function * actOnFunctionDeclaration(SMLoc Loc, StringRef Name);

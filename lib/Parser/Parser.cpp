@@ -76,6 +76,11 @@ bool Parser::parseFunction(Function *&F) {
 
     Actions.exitFunction();
 
+    // Once we have finished with the function,
+    // we can assign the labels to the loop instructions
+    // and the break/continue
+    Actions.assignLoopLabels(*F);
+
     return true;
 }
 
@@ -407,6 +412,7 @@ bool Parser::parseForStmt(BlockItems& Items)
     Expr * Cond = nullptr;
     Expr * Post = nullptr;
     Statement * Body = nullptr;
+    bool hasDeclaration = false;
 
     if (consume(tok::kw_for))
         return true;
@@ -420,6 +426,9 @@ bool Parser::parseForStmt(BlockItems& Items)
         // This code is a copy of parseDeclaration
         SMLoc DeclLoc = Tok.getLocation();
         advance(); // consume 'int'
+
+        Actions.enterScope();
+        hasDeclaration = true;
 
         if (expect(tok::identifier))
             return true;
@@ -481,6 +490,9 @@ bool Parser::parseForStmt(BlockItems& Items)
         return true;
     if (!body_sts.empty())
         Body = std::get<Statement*>(body_sts.back());
+
+    if (hasDeclaration)
+        Actions.exitScope();
 
     Actions.actOnForStatement(Items, Loc, init, Cond, Post, Body);
     return false;
