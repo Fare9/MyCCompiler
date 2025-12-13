@@ -62,14 +62,7 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
     {
     case Statement::SK_Return:
         {
-            const auto& RetStmt = dynamic_cast<const ReturnStatement&>(Stmt);
-
-            // Generate IR for the return value expression
-            ir::Value* RetVal = generateExpression(*RetStmt.getRetVal(), IRFunc);
-
-            // Create return instruction
-            ir::Ret* RetInst = Ctx.createRet(RetVal);
-            IRFunc->add_instruction(RetInst);
+            generateReturnStmt(Stmt, IRFunc);
             break;
         }
     case Statement::SK_Expression:
@@ -81,56 +74,55 @@ void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
         }
     case Statement::SK_If:
         {
-            const auto& IfStmt = dynamic_cast<const IfStatement&>(Stmt);
-            // generate conditional code
-            auto result = generateExpression(*IfStmt.getCondition(), IRFunc);
-            // generate labels
-            auto * else_label = Ctx.getOrCreateLabel("else_label");
-            auto * end_label = Ctx.getOrCreateLabel("end_label");
-            if (IfStmt.getElseSt() != nullptr)
-                IRFunc->add_instruction(Ctx.createJZ(result, else_label));
-            else
-                IRFunc->add_instruction(Ctx.createJZ(result, end_label));
-            // generate the code of `then`
-            generateStatement(*IfStmt.getThenSt(), IRFunc);
-            if (IfStmt.getElseSt() != nullptr)
-            {
-                // generate a JUMP to END label from the IF statement
-                IRFunc->add_instruction(Ctx.createJump(end_label));
-                // Now generate else
-                IRFunc->add_instruction(else_label);
-                generateStatement(*IfStmt.getElseSt(), IRFunc);
-            }
-            // Now we generate the END label
-            IRFunc->add_instruction(end_label);
-
+            generateIfStmt(Stmt, IRFunc);
             break;
         }
     case Statement::SK_Label:
         {
-            const auto& Label = dynamic_cast<const LabelStatement&>(Stmt);
-            const auto ILabel = Ctx.getOrCreateLabel(Label.getLabel().str(), true);
-            IRFunc->add_instruction(ILabel);
+            generateLabelStmt(Stmt, IRFunc);
             break;
         }
     case Statement::SK_Goto:
         {
-            const auto& Goto = dynamic_cast<const GotoStatement&>(Stmt);
-            const auto ILabel = Ctx.getOrCreateLabel(Goto.getLabel().str(), true);
-            IRFunc->add_instruction(Ctx.createJump(ILabel));
+            generateGotoStmt(Stmt, IRFunc);
             break;
         }
     case Statement::SK_Null:
         break;
     case Statement::SK_Compound:
         {
-            const auto& Compound = dynamic_cast<const CompoundStatement&>(Stmt);
-            // managing compound statement is exactly the same
-            // as managing a function block.
-            for (const BlockItem& Item : Compound)
-            {
-                generateBlockItem(Item, IRFunc);
-            }
+            generateCompoundStmt(Stmt, IRFunc);
+            break;
+        }
+    case Statement::SK_Break:
+        {
+            const auto & BreakStmt = dynamic_cast<const BreakStatement&>(Stmt);
+            auto * label =
+                Ctx.getOrCreateLabel(std::string(BreakStmt.get_label()), true);
+            IRFunc->add_instruction(Ctx.createJump(label));
+            break;
+        }
+    case Statement::SK_Continue:
+        {
+            const auto & ContinueStmt = dynamic_cast<const ContinueStatement&>(Stmt);
+            auto * label =
+                Ctx.getOrCreateLabel(std::string(ContinueStmt.get_label()), true);
+            IRFunc->add_instruction(Ctx.createJump(label));
+            break;
+        }
+    case Statement::SK_While:
+        {
+            generateWhileStmt(Stmt, IRFunc);
+            break;
+        }
+    case Statement::SK_DoWhile:
+        {
+            generateDoWhileStmt(Stmt, IRFunc);
+            break;
+        }
+    case Statement::SK_For:
+        {
+            generateForStmt(Stmt, IRFunc);
             break;
         }
     }
@@ -150,6 +142,190 @@ void IRGenerator::generateDeclaration(const Declaration& Decl, ir::Function* IRF
     // Now we create a copy that we include in functions
     auto* varop = generateExpression(*left, IRFunc);
     IRFunc->add_instruction(Ctx.createCopy(result, varop));
+}
+
+void IRGenerator::generateReturnStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& RetStmt = dynamic_cast<const ReturnStatement&>(Stmt);
+
+    // Generate IR for the return value expression
+    ir::Value* RetVal = generateExpression(*RetStmt.getRetVal(), IRFunc);
+
+    // Create return instruction
+    ir::Ret* RetInst = Ctx.createRet(RetVal);
+    IRFunc->add_instruction(RetInst);
+}
+
+void IRGenerator::generateIfStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& IfStmt = dynamic_cast<const IfStatement&>(Stmt);
+    // generate conditional code
+    auto result = generateExpression(*IfStmt.getCondition(), IRFunc);
+    // generate labels
+    auto * else_label = Ctx.getOrCreateLabel("else_label");
+    auto * end_label = Ctx.getOrCreateLabel("end_label");
+    if (IfStmt.getElseSt() != nullptr)
+        IRFunc->add_instruction(Ctx.createJZ(result, else_label));
+    else
+        IRFunc->add_instruction(Ctx.createJZ(result, end_label));
+    // generate the code of `then`
+    generateStatement(*IfStmt.getThenSt(), IRFunc);
+    if (IfStmt.getElseSt() != nullptr)
+    {
+        // generate a JUMP to END label from the IF statement
+        IRFunc->add_instruction(Ctx.createJump(end_label));
+        // Now generate else
+        IRFunc->add_instruction(else_label);
+        generateStatement(*IfStmt.getElseSt(), IRFunc);
+    }
+    // Now we generate the END label
+    IRFunc->add_instruction(end_label);
+}
+
+void IRGenerator::generateLabelStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& Label = dynamic_cast<const LabelStatement&>(Stmt);
+    const auto ILabel = Ctx.getOrCreateLabel(Label.getLabel().str(), true);
+    IRFunc->add_instruction(ILabel);
+}
+
+void IRGenerator::generateGotoStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& Goto = dynamic_cast<const GotoStatement&>(Stmt);
+    const auto ILabel = Ctx.getOrCreateLabel(Goto.getLabel().str(), true);
+    IRFunc->add_instruction(Ctx.createJump(ILabel));
+}
+
+void IRGenerator::generateCompoundStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& Compound = dynamic_cast<const CompoundStatement&>(Stmt);
+    // managing compound statement is exactly the same
+    // as managing a function block.
+    for (const BlockItem& Item : Compound)
+    {
+        generateBlockItem(Item, IRFunc);
+    }
+}
+
+void IRGenerator::generateWhileStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& While = dynamic_cast<const WhileStatement&>(Stmt);
+
+    std::string while_start = std::string(While.get_label()) + "_start";
+    std::string while_continue = std::string(While.get_label()) + "_continue";
+    std::string while_end = std::string(While.get_label()) + "_end";
+
+    auto label_start = Ctx.getOrCreateLabel(while_start, true);
+    auto label_continue = Ctx.getOrCreateLabel(while_continue, true);
+    auto label_end = Ctx.getOrCreateLabel(while_end, true);
+
+    // Place start label
+    IRFunc->add_instruction(label_start);
+    IRFunc->add_instruction(label_continue);
+
+    // Evaluate condition
+    auto result = generateExpression(*While.getCondition(), IRFunc);
+
+    // Jump to end if condition is false (zero)
+    IRFunc->add_instruction(Ctx.createJZ(result, label_end));
+
+    // Generate loop body
+    generateStatement(*While.getBody(), IRFunc);
+
+    // Jump back to start
+    IRFunc->add_instruction(Ctx.createJump(label_start));
+
+    // Place end label
+    IRFunc->add_instruction(label_end);
+}
+
+void IRGenerator::generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& DoWhile = dynamic_cast<const DoWhileStatement&>(Stmt);
+
+    std::string do_while_start = std::string(DoWhile.get_label()) + "_start";
+    std::string do_while_continue = std::string(DoWhile.get_label()) + "_continue";
+    std::string do_while_end = std::string(DoWhile.get_label()) + "_end";
+
+    auto label_start = Ctx.getOrCreateLabel(do_while_start, true);
+    auto label_continue = Ctx.getOrCreateLabel(do_while_continue, true);
+    auto label_end = Ctx.getOrCreateLabel(do_while_end, true);
+
+    // Place label start
+    IRFunc->add_instruction(label_start);
+
+    // Generate the body of the do/while
+    generateStatement(*DoWhile.getBody(), IRFunc);
+
+    // In opposite to While, the label continue must jump to the expression check
+    IRFunc->add_instruction(label_continue);
+
+    // Now generate the expression
+    auto result = generateExpression(*DoWhile.getCondition(), IRFunc);
+
+    // Jump to end if condition is false (zero)
+    IRFunc->add_instruction(Ctx.createJZ(result, label_end));
+
+    // Jump back to start
+    IRFunc->add_instruction(Ctx.createJump(label_start));
+
+    // Place end label
+    IRFunc->add_instruction(label_end);
+}
+
+void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
+{
+    const auto& For = dynamic_cast<const ForStatement&>(Stmt);
+
+    std::string for_label_start = std::string(For.get_label()) + "_start";
+    std::string for_label_continue = std::string(For.get_label()) + "_continue";
+    std::string for_end = std::string(For.get_label()) + "_end";
+
+    auto label_start = Ctx.getOrCreateLabel(for_label_start, true);
+    auto label_continue = Ctx.getOrCreateLabel(for_label_continue, true);
+    auto label_end = Ctx.getOrCreateLabel(for_end, true);
+
+    // Now we generate a declaration or an expression
+    if (std::holds_alternative<Declaration *>(For.getInit()))
+    {
+        auto * decl = std::get<Declaration *>(For.getInit());
+        generateDeclaration(*decl, IRFunc);
+    } else if (std::holds_alternative<Expr *>(For.getInit()))
+    {
+        auto * expr = std::get<Expr *>(For.getInit());
+        generateExpression(*expr, IRFunc);
+    }
+
+    // Place start label
+    IRFunc->add_instruction(label_start);
+
+    // Evaluate condition
+    if (For.getCondition() != nullptr)
+    {
+        auto result = generateExpression(*For.getCondition(), IRFunc);
+
+        // Jump to end if condition is false (zero)
+        IRFunc->add_instruction(Ctx.createJZ(result, label_end));
+    }
+    // Generate loop body
+    generateStatement(*For.getBody(), IRFunc);
+
+    // Different to While and DoWhile, in For we need
+    // to set the label_continue, right before the
+    // post processing in the update of the variables.
+    IRFunc->add_instruction(label_continue);
+
+    // Generate update of the variables
+    if (For.getPost() != nullptr)
+    {
+        generateExpression(*For.getPost(), IRFunc);
+    }
+
+    // Jump back to start
+    IRFunc->add_instruction(Ctx.createJump(label_start));
+
+    // Place end label
+    IRFunc->add_instruction(label_end);
 }
 
 ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFunc)

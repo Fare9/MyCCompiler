@@ -25,7 +25,17 @@ private:
     // Convert AST Statement to IR Instructions
     void generateStatement(const Statement& Stmt, ir::Function* IRFunc);
     void generateDeclaration(const Declaration& Decl, ir::Function* IRFunc);
-    
+
+    // Convert Statements to IR values
+    void generateReturnStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateIfStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateLabelStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateGotoStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateCompoundStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateForStmt(const Statement& Stmt, ir::Function* IRFunc);
+
     // Convert AST Expression to IR Value
     ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);
 };

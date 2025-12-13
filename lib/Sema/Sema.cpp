@@ -133,7 +133,7 @@ void Sema::traverseStatement(Statement* stmt, std::vector<std::string>& loopStac
                 }
             } else {
                 // Continue jumps to start of loop: loop_N_start
-                std::string targetLabel = loopStack.back() + "_start";
+                std::string targetLabel = loopStack.back() + "_continue";
                 continueStmt->set_label(targetLabel);
             }
             break;
