@@ -57,6 +57,22 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printLabelStatement(dynamic_cast<const LabelStatement*>(statement), indent);
         case Statement::SK_Goto:
             return printGotoStatement(dynamic_cast<const GotoStatement*>(statement), indent);
+        case Statement::SK_Break:
+            return printBreakStatement(dynamic_cast<const BreakStatement*>(statement), indent);
+        case Statement::SK_Continue:
+            return printContinueStatement(dynamic_cast<const ContinueStatement*>(statement), indent);
+        case Statement::SK_While:
+            return printWhileStatement(dynamic_cast<const WhileStatement*>(statement), indent);
+        case Statement::SK_DoWhile:
+            return printDoWhileStatement(dynamic_cast<const DoWhileStatement*>(statement), indent);
+        case Statement::SK_For:
+            return printForStatement(dynamic_cast<const ForStatement*>(statement), indent);
+        case Statement::SK_Switch:
+            return printSwitchStatement(dynamic_cast<const SwitchStatement*>(statement), indent);
+        case Statement::SK_Case:
+            return printCaseStatement(dynamic_cast<const CaseStatement*>(statement), indent);
+        case Statement::SK_Default:
+            return printDefaultStatement(dynamic_cast<const DefaultStatement*>(statement), indent);
     }
     return getIndent(indent) + "Unknown Statement\n";
 }
@@ -325,6 +341,104 @@ std::string ASTPrinter::printGotoStatement(const GotoStatement* stmt, int indent
     return getIndent(indent) + "GotoStatement: " + stmt->getLabel().str() + "\n";
 }
 
+std::string ASTPrinter::printBreakStatement(const BreakStatement* stmt, int indent)
+{
+    return getIndent(indent) + "BreakStatement\n";
+}
+
+std::string ASTPrinter::printContinueStatement(const ContinueStatement* stmt, int indent)
+{
+    return getIndent(indent) + "ContinueStatement\n";
+}
+
+std::string ASTPrinter::printWhileStatement(const WhileStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "WhileStatement\n";
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->getCondition()) {
+        output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->getBody()) {
+        output += print(stmt->getBody(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printDoWhileStatement(const DoWhileStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "DoWhileStatement\n";
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->getBody()) {
+        output += print(stmt->getBody(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->getCondition()) {
+        output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printForStatement(const ForStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "ForStatement\n";
+
+    // Print init
+    output += getIndent(indent + 1) + "Init:\n";
+    const ForInit& init = stmt->getInit();
+    if (std::holds_alternative<Declaration*>(init)) {
+        output += print(std::get<Declaration*>(init), indent + 2);
+    } else if (std::holds_alternative<Expr*>(init)) {
+        output += print(std::get<Expr*>(init), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->getCondition()) {
+        output += print(stmt->getCondition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print post
+    output += getIndent(indent + 1) + "Post:\n";
+    if (stmt->getPost()) {
+        output += print(stmt->getPost(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->getBody()) {
+        output += print(stmt->getBody(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
 std::string ASTPrinter::printConditionalExpr(const ConditionalExpr* expr, int indent) {
     std::string output = getIndent(indent) + "ConditionalExpr\n";
 
@@ -353,6 +467,49 @@ std::string ASTPrinter::printConditionalExpr(const ConditionalExpr* expr, int in
     }
 
     return output;
+}
+
+std::string ASTPrinter::printSwitchStatement(const SwitchStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "SwitchStatement\n";
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->get_condition()) {
+        output += print(stmt->get_condition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->get_body()) {
+        output += print(stmt->get_body(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printCaseStatement(const CaseStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "CaseStatement\n";
+
+    // Print case value
+    output += getIndent(indent + 1) + "Value:\n";
+    if (stmt->getValue()) {
+        output += print(stmt->getValue(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printDefaultStatement(const DefaultStatement* stmt, int indent)
+{
+    return getIndent(indent) + "DefaultStatement\n";
 }
 
 std::string ASTPrinter::getIndent(int level) {

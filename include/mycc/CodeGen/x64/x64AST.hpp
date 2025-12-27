@@ -36,6 +36,8 @@ using X64Instructions = std::deque<X64Instruction*>;
 
 class X64Operand {
 public:
+    virtual ~X64Operand() = default;
+
     [[nodiscard]] virtual std::string to_string() const = 0;
 };
 
@@ -242,6 +244,8 @@ public:
 
 class X64Instruction {
 public:
+    virtual ~X64Instruction() = default;
+
     virtual std::string to_string() const = 0;
 };
 

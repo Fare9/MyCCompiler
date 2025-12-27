@@ -101,11 +101,28 @@ make
 
 The compiler currently supports:
 - Basic C syntax parsing
-- Variable declarations and assignments
-- Arithmetic and logical expressions
-- Control flow statements
-- Function definitions
+- Variable declarations and assignments with scoped name resolution
+- Arithmetic and logical expressions with proper operator precedence
+- Unary operators (negation, bitwise complement, logical not)
+- Binary operators (arithmetic, bitwise, comparison, logical)
+- Ternary conditional operator
+- Assignment and compound assignment operators
+- Prefix and postfix increment/decrement operators
+- Control flow statements:
+  - Conditional statements (if/else)
+  - Loop statements (while, do-while, for)
+  - Jump statements (break, continue, goto)
+  - Switch statements with case and default labels
+- Labeled statements and goto
+- Function definitions with block scope
 - Short-circuit evaluation for logical operators
-- x86-64 assembly generation
+- Comprehensive semantic validation:
+  - Variable scope and lifetime management
+  - Duplicate declaration detection
+  - Break/continue validation in loop contexts
+  - Switch statement validation (constant case values, duplicate cases, multiple defaults)
+  - Label uniqueness and goto target validation
+  - Declaration placement validation (labels must precede statements, not declarations)
+- x86-64 assembly generation with Intel syntax
 
 For detailed technical information about the compiler's architecture and implementation, see [TECHNICAL.md](TECHNICAL.md).

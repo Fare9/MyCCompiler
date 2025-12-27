@@ -15,5 +15,15 @@ DIAG(err_undefined_label, Error, "use of undeclared label '{}'")
 DIAG(err_expected_statement_after_label, Error, "Error, expected a statement after a label, not a declaration")
 DIAG(err_label_cannot_end_block, Error, "Error, label cannot be the last statement of a block")
 
+DIAG(err_break_not_in_loop, Error, "'break' statement not in loop or switch statement")
+DIAG(err_continue_not_in_loop, Error, "'continue' statement not in loop statement")
+DIAG(err_case_not_in_switch, Error, "'case' statement not in switch statement")
+DIAG(err_default_not_in_switch, Error, "'default' statement not in switch statement")
+
+DIAG(err_case_value_not_constant, Error, "case value is not a constant expression")
+DIAG(err_duplicate_case_value, Error, "duplicate case value '{}'")
+DIAG(err_multiple_default_in_switch, Error, "multiple default labels in one switch")
+DIAG(err_declaration_after_case_label, Error, "a label can only be part of a statement and a declaration is not a statement")
+
 
 #undef DIAG

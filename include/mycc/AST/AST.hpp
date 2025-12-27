@@ -25,6 +25,7 @@ class Expr;
 using ExprList = std::vector<Expr*>;
 using StmtList = std::vector<Statement*>;
 using BlockItem = std::variant<Statement *, Declaration *, std::monostate>;
+using ForInit = std::variant<Declaration *, Expr *, std::monostate>;
 using BlockItems = std::vector<BlockItem>;
 using FuncList = std::vector<Function*>;
 
@@ -39,6 +40,14 @@ public:
         SK_Compound,
         SK_Label,
         SK_Goto,
+        SK_Break,
+        SK_Continue,
+        SK_While,
+        SK_DoWhile,
+        SK_For,
+        SK_Case,
+        SK_Default,
+        SK_Switch,
         SK_Null,
     };
 private:
@@ -238,6 +247,255 @@ public:
 
     static bool classof(const Statement * S) {
         return S->getKind() == SK_Goto;
+    }
+};
+
+class BreakStatement : public Statement
+{
+private:
+    std::string label;
+public:
+    BreakStatement() : Statement(SK_Break) {}
+
+    ~BreakStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_Break;
+    }
+};
+
+class ContinueStatement : public Statement
+{
+private:
+    std::string label;
+public:
+    ContinueStatement() : Statement(SK_Continue) {}
+
+    ~ContinueStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_Continue;
+    }
+};
+
+class WhileStatement : public Statement
+{
+private:
+    // condition inside of while statement
+    Expr * Condition;
+    // Body of the while condition
+    Statement * Body;
+    // An identifier label for the while loop
+    std::string label;
+public:
+    WhileStatement(Expr * condition, Statement * body) :
+        Statement(SK_While), Condition(condition), Body(body) {}
+
+    ~WhileStatement() override = default;
+
+    Expr * getCondition() const
+    {
+        return Condition;
+    }
+
+    Statement * getBody() const
+    {
+        return Body;
+    }
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_While;
+    }
+};
+
+class DoWhileStatement : public Statement
+{
+private:
+    // Body of the do/while condition
+    Statement * Body;
+    // condition inside of while statement
+    Expr * Condition;
+    // An identifier label for the do-while loop
+    std::string label;
+public:
+    DoWhileStatement(Statement * body, Expr * condition) :
+        Statement(SK_DoWhile), Body(body), Condition(condition) {}
+
+    ~DoWhileStatement() override = default;
+
+    Statement * getBody() const
+    {
+        return Body;
+    }
+
+    Expr * getCondition() const
+    {
+        return Condition;
+    }
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    static bool classof(const Statement * S)
+    {
+        return S->getKind() == SK_DoWhile;
+    }
+};
+
+class ForStatement : public Statement
+{
+private:
+    ForInit Init;       // This can be a Declaration, Expr, or nothing
+    Expr * Condition;   // Optional condition
+    Expr * Post;        // Optional post expression
+    Statement * Body;   // Body of For loop
+    // An identifier label for the do-while loop
+    std::string label;
+public:
+    ForStatement(ForInit init, Expr * condition, Expr * post, Statement * body) :
+        Statement(SK_For), Init(std::move(init)), Condition(condition),
+        Post(post), Body(body) {}
+
+    ~ForStatement() override = default;
+
+    const ForInit& getInit() const
+    {
+        return Init;
+    }
+
+    Expr* getCondition() const { return Condition; }
+
+    Expr* getPost() const { return Post; }
+
+    Statement* getBody() const { return Body; }
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    static bool classof(const Statement* S) {
+        return S->getKind() == SK_For;
+    }
+};
+
+class CaseStatement : public Statement
+{
+    Expr* Value; // Constant expression checked
+    std::string label; // the label of the case for jumping
+public:
+    CaseStatement(Expr* value) :
+        Statement(SK_Case), Value(value)
+    {
+    }
+
+    ~CaseStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    Expr* getValue() const { return Value; }
+};
+
+class DefaultStatement : public Statement
+{
+    std::string label; // Internal label for Jumping
+public:
+    DefaultStatement() : Statement(SK_Default)
+    {
+    }
+
+    ~DefaultStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+};
+
+
+class SwitchStatement : public Statement
+{
+    Expr* Condition; // Controlling expression
+    Statement* Body; // Usually a switch will be a CompoundStatement containing case labels
+    std::string break_label; // Label to jump to when breaking
+public:
+    SwitchStatement(Expr* condition, Statement* body) :
+        Statement(SK_Switch), Condition(condition), Body(body)
+    {
+    }
+
+    Expr* get_condition() const {
+        return Condition;
+    }
+
+    Statement* get_body() const {
+        return Body;
+    }
+
+    void set_break_label(std::string label) {
+        this->break_label = label;
+    }
+
+    std::string_view get_break_label() const {
+        return this->break_label;
     }
 };
 

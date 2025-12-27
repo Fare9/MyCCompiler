@@ -77,9 +77,16 @@ KEYWORD(if, KEYALL)             // Added control flow
 KEYWORD(else, KEYALL)
 KEYWORD(while, KEYALL)
 KEYWORD(for, KEYALL)
+KEYWORD(tree, KEYALL)
 KEYWORD(return, KEYALL)
 KEYWORD(sizeof, KEYALL)         // Added sizeof operator
 KEYWORD(goto, KEYALL)
+KEYWORD(break, KEYALL)          // For loops in chapter 8
+KEYWORD(continue, KEYALL)       // For loops in chapter 8
+KEYWORD(do, KEYALL)             // For loops in Chapter 8
+KEYWORD(switch, KEYALL)         // For switch from Chapter 8
+KEYWORD(case, KEYALL)           // For switch from Chapter 8
+KEYWORD(default, KEYALL)        // For switch from Chapter 8
 
 #undef KEYWORD
 #undef PUNCTUATOR

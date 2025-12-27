@@ -28,6 +28,14 @@ private:
     static std::string printCompoundStatement(const CompoundStatement* stmt, int indent);
     static std::string printLabelStatement(const LabelStatement* stmt, int indent);
     static std::string printGotoStatement(const GotoStatement* stmt, int indent);
+    static std::string printBreakStatement(const BreakStatement* stmt, int indent);
+    static std::string printContinueStatement(const ContinueStatement* stmt, int indent);
+    static std::string printWhileStatement(const WhileStatement* stmt, int indent);
+    static std::string printDoWhileStatement(const DoWhileStatement* stmt, int indent);
+    static std::string printForStatement(const ForStatement* stmt, int indent);
+    static std::string printSwitchStatement(const SwitchStatement* stmt, int indent);
+    static std::string printCaseStatement(const CaseStatement* stmt, int indent);
+    static std::string printDefaultStatement(const DefaultStatement* stmt, int indent);
     static std::string printIntegerLiteral(const IntegerLiteral* expr, int indent);
     static std::string printVar(const Var* expr, int indent);
     static std::string printUnaryOperator(const UnaryOperator* expr, int indent);

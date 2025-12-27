@@ -76,6 +76,11 @@ bool Parser::parseFunction(Function *&F) {
 
     Actions.exitFunction();
 
+    // Once we have finished with the function,
+    // we can assign the labels to the loop instructions
+    // and the break/continue
+    Actions.assignLoopLabels(*F);
+
     return true;
 }
 
@@ -150,6 +155,47 @@ bool Parser::parseStatement(BlockItems& Items) {
     if (Tok.is(tok::kw_goto))
     {
         return parseGotoStmt(Items);
+    }
+    if (Tok.is(tok::kw_while))
+    {
+        return parseWhileStmt(Items);
+    }
+    if (Tok.is(tok::kw_do))
+    {
+        return parseDoWhileStmt(Items);
+    }
+    if (Tok.is(tok::kw_for) || Tok.is(tok::kw_tree))
+    {
+        return parseForStmt(Items);
+    }
+    if (Tok.is(tok::kw_break))
+    {
+        SMLoc Loc = Tok.getLocation();
+        if (consume(tok::kw_break))
+            return true;
+        if (consume(tok::semi))
+            return true;
+        Actions.actOnBreakStatement(Items, Loc);
+        return false;
+    }
+    if (Tok.is(tok::kw_continue))
+    {
+        SMLoc Loc = Tok.getLocation();
+        if (consume(tok::kw_continue))
+            return true;
+        if (consume(tok::semi))
+            return true;
+        Actions.actOnContinueStatement(Items, Loc);
+        return false;
+    }
+    if (Tok.is(tok::kw_case)) {
+        return parseCaseStatement(Items);
+    }
+    if (Tok.is(tok::kw_default)) {
+        return parseDefaultStatement(Items);
+    }
+    if (Tok.is(tok::kw_switch)) {
+        return parseSwitchStatement(Items);
     }
     if (Tok.is(tok::identifier))
     {
@@ -299,6 +345,224 @@ bool Parser::parseGotoStmt(BlockItems& Items)
     if (consume(tok::semi))
         return true;
 
+    return false;
+}
+
+bool Parser::parseWhileStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+
+    Expr * Cond = nullptr;
+    Statement * Body = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_while))
+        return true;
+
+    // Parse expression in between parenthesis "(" <Exp> ")"
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    if (parseStatement(body_sts))
+        return true;
+
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnWhileStatement(Items, Loc, Cond, Body);
+    return false;
+}
+
+bool Parser::parseDoWhileStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+
+    Statement * Body = nullptr;
+    Expr * Cond = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_do))
+        return true;
+
+    if (parseStatement(body_sts))
+        return true;
+
+    if (consume(tok::kw_while))
+        return true;
+
+    // Consume the expression from the do/while
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    if (consume(tok::semi))
+        return true;
+
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnDoWhileStatement(Items, Loc, Body, Cond);
+    return false;
+}
+
+bool Parser::parseForStmt(BlockItems& Items)
+{
+    SMLoc Loc = Tok.getLocation();
+    ForInit init = std::monostate{};
+    Expr * Cond = nullptr;
+    Expr * Post = nullptr;
+    Statement * Body = nullptr;
+    bool hasDeclaration = false;
+
+    if (consume(tok::kw_for) && consume(tok::kw_tree))
+        return true;
+
+    if (consume(tok::l_paren))
+        return true;
+
+    // Parse init (Declaration | Expr | nothing)
+    if (Tok.is(tok::kw_int)) {
+        // Handle declaration like "int i = 0"
+        // This code is a copy of parseDeclaration
+        SMLoc DeclLoc = Tok.getLocation();
+        advance(); // consume 'int'
+
+        Actions.enterScope();
+        hasDeclaration = true;
+
+        if (expect(tok::identifier))
+            return true;
+
+        StringRef varName = Tok.getIdentifier();
+        advance();
+
+        // Create a temporary BlockItems just for the declaration
+        BlockItems tempItems;
+        if (Actions.actOnVarDeclaration(tempItems, DeclLoc, varName))
+            return true;
+
+        Declaration* decl = std::get<Declaration*>(tempItems.back());
+
+        // Check for optional initializer
+        Expr* exp = nullptr;
+        if (Tok.is(tok::equal)) {
+            advance();
+            if (parseExpr(exp))
+                return true;
+        }
+
+        decl->setExpr(exp);
+        init = decl;
+    } else if (!Tok.is(tok::semi)) {
+        // Handle expression: i = 0
+        Expr* initExpr = nullptr;
+        if (parseExpr(initExpr, 0))
+            return true;
+        init = initExpr;
+    }
+    // If it's just ';', init stays as std::monostate{}
+    if (consume(tok::semi))
+        return true;
+
+    // Now we need to detect if we need to parse a
+    // conditional expression
+    if (!Tok.is(tok::semi))
+    {
+        if (parseExpr(Cond, 0))
+            return true;
+    }
+
+    if (consume(tok::semi))
+        return true;
+
+    // Now check if we have a post loop
+    if (!Tok.is(tok::r_paren))
+    {
+        if (parseExpr(Post, 0))
+            return true;
+    }
+
+    if (consume(tok::r_paren))
+        return true;
+
+    BlockItems body_sts;
+    if (parseStatement(body_sts))
+        return true;
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    if (hasDeclaration)
+        Actions.exitScope();
+
+    Actions.actOnForStatement(Items, Loc, init, Cond, Post, Body);
+    return false;
+}
+
+bool Parser::parseDefaultStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    if (consume(tok::kw_default))
+        return true;
+
+    if (consume(tok::colon))
+        return true;
+
+    Actions.actOnDefaultStatement(Items, Loc);
+    return false;
+}
+
+bool Parser::parseCaseStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    if (consume(tok::kw_case))
+        return true;
+
+    Expr * CaseExpr = nullptr;
+    if (parseExpr(CaseExpr, 0))
+        return true;
+
+    if (consume(tok::colon))
+        return true;
+
+    Actions.actOnCaseStatement(Items, Loc, CaseExpr);
+    return false;
+}
+
+bool Parser::parseSwitchStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    Expr * Cond = nullptr;
+    Statement* Body = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_switch))
+        return true;
+
+    // Parse the conditional expression "(" <Exp> ")"
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    // Parse the body (this will typically be a compound statement with case labels)
+    if (parseStatement(body_sts))
+        return true;
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnSwitchStatement(Items, Loc, Cond, Body);
     return false;
 }
 
