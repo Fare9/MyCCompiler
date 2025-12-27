@@ -9,7 +9,18 @@ namespace codegen {
 class IRGenerator {
     ir::Context& Ctx;
     ir::Program& IRProg;
-    
+
+    struct CaseInfo {
+        Expr * value;
+        std::string label;
+    };
+
+    void collectSwitchCases(
+        const Statement *stmt,
+        std::vector<CaseInfo>& cases,
+        std::string& defaultLabel,
+        bool& hasDefault);
+
 public:
     IRGenerator(ir::Context& Ctx, ir::Program& IRProg) 
         : Ctx(Ctx), IRProg(IRProg) {}
@@ -35,6 +46,9 @@ private:
     void generateWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateForStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateCaseStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateDefaultStmt(const Statement& Stmt, ir::Function* IRFunc);
 
     // Convert AST Expression to IR Value
     ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);

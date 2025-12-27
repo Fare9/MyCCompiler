@@ -18,12 +18,27 @@ The lexical analyzer (`Lexer`) transforms raw source text into a sequence of tok
 
 ### Parser
 
-The parser implements a recursive descent parsing strategy to construct an Abstract Syntax Tree (AST) from the token stream. The grammar supports:
+The parser implements a recursive descent parsing strategy with operator precedence parsing for expressions. The implementation constructs an Abstract Syntax Tree (AST) from the token stream with support for:
 
-- **Declarations**: Variable declarations with optional initialization
-- **Expressions**: Binary operations, unary operations, assignments, and variable references
-- **Statements**: Expression statements, return statements, and null statements
-- **Functions**: Function definitions with statement blocks
+- **Declarations**: Variable declarations with optional initialization expressions
+- **Expressions**:
+  - Primary expressions (integer literals, identifiers, parenthesized expressions)
+  - Unary operations (negation, bitwise complement, logical not)
+  - Binary operations with precedence (arithmetic, bitwise, relational, logical)
+  - Ternary conditional operator (condition ? true_expr : false_expr)
+  - Assignment expressions with compound assignment operators
+  - Prefix and postfix increment/decrement operators
+- **Statements**:
+  - Expression statements
+  - Return statements
+  - Null statements (empty semicolon)
+  - Compound statements (blocks with declarations and statements)
+  - Conditional statements (if/else)
+  - Loop statements (while, do-while, for with optional init/condition/post)
+  - Jump statements (break, continue, goto)
+  - Labeled statements (identifier labels, case labels, default label)
+  - Switch statements with case/default labels
+- **Functions**: Function definitions with block-scoped statement sequences
 
 ### Abstract Syntax Tree
 

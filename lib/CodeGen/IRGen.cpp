@@ -4,174 +4,160 @@
 using namespace mycc;
 using namespace mycc::codegen;
 
-void IRGenerator::generateIR(const Program& ASTProgram)
-{
+void IRGenerator::generateIR(const Program &ASTProgram) {
     // Convert each AST function to IR function
-    for (const Function* ASTFunc : ASTProgram)
-    {
-        ir::Function* IRFunc = generateFunction(*ASTFunc);
+    for (const Function *ASTFunc: ASTProgram) {
+        ir::Function *IRFunc = generateFunction(*ASTFunc);
         IRProg.add_function(IRFunc);
     }
 }
 
-ir::Function* IRGenerator::generateFunction(const Function& ASTFunc)
-{
+ir::Function *IRGenerator::generateFunction(const Function &ASTFunc) {
     // Create new IR function
     ir::InstList instructions;
-    auto* IRFunc = new ir::Function(instructions, ASTFunc.getName());
+    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName());
 
     // simple fix for now, we generate a Return(0) if no Return exists
     bool containsReturn = false;
 
     // Generate IR for each statement in the function
-    for (const BlockItem& Item : ASTFunc)
-    {
+    for (const BlockItem &Item: ASTFunc) {
         containsReturn |= generateBlockItem(Item, IRFunc);
     }
 
-    if (!containsReturn)
-    {
-        ir::Int* RetVal = Ctx.createInt(llvm::APSInt::get(0));
-        ir::Ret* RetInst = Ctx.createRet(RetVal);
+    if (!containsReturn) {
+        ir::Int *RetVal = Ctx.createInt(llvm::APSInt::get(0));
+        ir::Ret *RetInst = Ctx.createRet(RetVal);
         IRFunc->add_instruction(RetInst);
     }
 
     return IRFunc;
 }
 
-bool IRGenerator::generateBlockItem(const BlockItem& Item, ir::Function* IRFunc)
-{
-    if (std::holds_alternative<Statement*>(Item))
-    {
-        Statement* Stmt = std::get<Statement*>(Item);
+bool IRGenerator::generateBlockItem(const BlockItem &Item, ir::Function *IRFunc) {
+    if (std::holds_alternative<Statement *>(Item)) {
+        Statement *Stmt = std::get<Statement *>(Item);
         generateStatement(*Stmt, IRFunc);
         if (Stmt->getKind() == Statement::SK_Return)
             return true;
-    }
-    else if (std::holds_alternative<Declaration*>(Item))
-    {
-        Declaration* Decl = std::get<Declaration*>(Item);
+    } else if (std::holds_alternative<Declaration *>(Item)) {
+        Declaration *Decl = std::get<Declaration *>(Item);
         generateDeclaration(*Decl, IRFunc);
     }
     return false;
 }
 
-void IRGenerator::generateStatement(const Statement& Stmt, ir::Function* IRFunc)
-{
-    switch (Stmt.getKind())
-    {
-    case Statement::SK_Return:
-        {
+void IRGenerator::generateStatement(const Statement &Stmt, ir::Function *IRFunc) {
+    switch (Stmt.getKind()) {
+        case Statement::SK_Return: {
             generateReturnStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_Expression:
-        {
-            const auto& ExprStmt = dynamic_cast<const ExpressionStatement&>(Stmt);
+        case Statement::SK_Expression: {
+            const auto &ExprStmt = dynamic_cast<const ExpressionStatement &>(Stmt);
             // Generate the expression
             generateExpression(*ExprStmt.getExpr(), IRFunc);
             break;
         }
-    case Statement::SK_If:
-        {
+        case Statement::SK_If: {
             generateIfStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_Label:
-        {
+        case Statement::SK_Label: {
             generateLabelStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_Goto:
-        {
+        case Statement::SK_Goto: {
             generateGotoStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_Null:
-        break;
-    case Statement::SK_Compound:
-        {
+        case Statement::SK_Null:
+            break;
+        case Statement::SK_Compound: {
             generateCompoundStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_Break:
-        {
-            const auto & BreakStmt = dynamic_cast<const BreakStatement&>(Stmt);
-            auto * label =
-                Ctx.getOrCreateLabel(std::string(BreakStmt.get_label()), true);
+        case Statement::SK_Break: {
+            const auto &BreakStmt = dynamic_cast<const BreakStatement &>(Stmt);
+            auto *label =
+                    Ctx.getOrCreateLabel(std::string(BreakStmt.get_label()), true);
             IRFunc->add_instruction(Ctx.createJump(label));
             break;
         }
-    case Statement::SK_Continue:
-        {
-            const auto & ContinueStmt = dynamic_cast<const ContinueStatement&>(Stmt);
-            auto * label =
-                Ctx.getOrCreateLabel(std::string(ContinueStmt.get_label()), true);
+        case Statement::SK_Continue: {
+            const auto &ContinueStmt = dynamic_cast<const ContinueStatement &>(Stmt);
+            auto *label =
+                    Ctx.getOrCreateLabel(std::string(ContinueStmt.get_label()), true);
             IRFunc->add_instruction(Ctx.createJump(label));
             break;
         }
-    case Statement::SK_While:
-        {
+        case Statement::SK_While: {
             generateWhileStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_DoWhile:
-        {
+        case Statement::SK_DoWhile: {
             generateDoWhileStmt(Stmt, IRFunc);
             break;
         }
-    case Statement::SK_For:
-        {
+        case Statement::SK_For: {
             generateForStmt(Stmt, IRFunc);
+            break;
+        }
+        case Statement::SK_Switch: {
+            generateSwitchStmt(Stmt, IRFunc);
+            break;
+        }
+        case Statement::SK_Case: {
+            generateCaseStmt(Stmt, IRFunc);
+            break;
+        }
+        case Statement::SK_Default: {
+            generateDefaultStmt(Stmt, IRFunc);
             break;
         }
     }
 }
 
-void IRGenerator::generateDeclaration(const Declaration& Decl, ir::Function* IRFunc)
-{
+void IRGenerator::generateDeclaration(const Declaration &Decl, ir::Function *IRFunc) {
     if (Decl.getExpr() == nullptr) return;
-    const auto* left = Decl.getVar();
-    const auto* right = Decl.getExpr();
+    const auto *left = Decl.getVar();
+    const auto *right = Decl.getExpr();
 
     // We create a Declaration like an assignment in case
     // this one has an expression
 
     // First we emit the right part of the assignment
-    auto* result = generateExpression(*right, IRFunc);
+    auto *result = generateExpression(*right, IRFunc);
     // Now we create a copy that we include in functions
-    auto* varop = generateExpression(*left, IRFunc);
+    auto *varop = generateExpression(*left, IRFunc);
     IRFunc->add_instruction(Ctx.createCopy(result, varop));
 }
 
-void IRGenerator::generateReturnStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& RetStmt = dynamic_cast<const ReturnStatement&>(Stmt);
+void IRGenerator::generateReturnStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &RetStmt = dynamic_cast<const ReturnStatement &>(Stmt);
 
     // Generate IR for the return value expression
-    ir::Value* RetVal = generateExpression(*RetStmt.getRetVal(), IRFunc);
+    ir::Value *RetVal = generateExpression(*RetStmt.getRetVal(), IRFunc);
 
     // Create return instruction
-    ir::Ret* RetInst = Ctx.createRet(RetVal);
+    ir::Ret *RetInst = Ctx.createRet(RetVal);
     IRFunc->add_instruction(RetInst);
 }
 
-void IRGenerator::generateIfStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& IfStmt = dynamic_cast<const IfStatement&>(Stmt);
+void IRGenerator::generateIfStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &IfStmt = dynamic_cast<const IfStatement &>(Stmt);
     // generate conditional code
     auto result = generateExpression(*IfStmt.getCondition(), IRFunc);
     // generate labels
-    auto * else_label = Ctx.getOrCreateLabel("else_label");
-    auto * end_label = Ctx.getOrCreateLabel("end_label");
+    auto *else_label = Ctx.getOrCreateLabel("else_label");
+    auto *end_label = Ctx.getOrCreateLabel("end_label");
     if (IfStmt.getElseSt() != nullptr)
         IRFunc->add_instruction(Ctx.createJZ(result, else_label));
     else
         IRFunc->add_instruction(Ctx.createJZ(result, end_label));
     // generate the code of `then`
     generateStatement(*IfStmt.getThenSt(), IRFunc);
-    if (IfStmt.getElseSt() != nullptr)
-    {
+    if (IfStmt.getElseSt() != nullptr) {
         // generate a JUMP to END label from the IF statement
         IRFunc->add_instruction(Ctx.createJump(end_label));
         // Now generate else
@@ -182,34 +168,29 @@ void IRGenerator::generateIfStmt(const Statement& Stmt, ir::Function* IRFunc)
     IRFunc->add_instruction(end_label);
 }
 
-void IRGenerator::generateLabelStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& Label = dynamic_cast<const LabelStatement&>(Stmt);
+void IRGenerator::generateLabelStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &Label = dynamic_cast<const LabelStatement &>(Stmt);
     const auto ILabel = Ctx.getOrCreateLabel(Label.getLabel().str(), true);
     IRFunc->add_instruction(ILabel);
 }
 
-void IRGenerator::generateGotoStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& Goto = dynamic_cast<const GotoStatement&>(Stmt);
+void IRGenerator::generateGotoStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &Goto = dynamic_cast<const GotoStatement &>(Stmt);
     const auto ILabel = Ctx.getOrCreateLabel(Goto.getLabel().str(), true);
     IRFunc->add_instruction(Ctx.createJump(ILabel));
 }
 
-void IRGenerator::generateCompoundStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& Compound = dynamic_cast<const CompoundStatement&>(Stmt);
+void IRGenerator::generateCompoundStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &Compound = dynamic_cast<const CompoundStatement &>(Stmt);
     // managing compound statement is exactly the same
     // as managing a function block.
-    for (const BlockItem& Item : Compound)
-    {
+    for (const BlockItem &Item: Compound) {
         generateBlockItem(Item, IRFunc);
     }
 }
 
-void IRGenerator::generateWhileStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& While = dynamic_cast<const WhileStatement&>(Stmt);
+void IRGenerator::generateWhileStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &While = dynamic_cast<const WhileStatement &>(Stmt);
 
     std::string while_start = std::string(While.get_label()) + "_start";
     std::string while_continue = std::string(While.get_label()) + "_continue";
@@ -239,9 +220,8 @@ void IRGenerator::generateWhileStmt(const Statement& Stmt, ir::Function* IRFunc)
     IRFunc->add_instruction(label_end);
 }
 
-void IRGenerator::generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& DoWhile = dynamic_cast<const DoWhileStatement&>(Stmt);
+void IRGenerator::generateDoWhileStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &DoWhile = dynamic_cast<const DoWhileStatement &>(Stmt);
 
     std::string do_while_start = std::string(DoWhile.get_label()) + "_start";
     std::string do_while_continue = std::string(DoWhile.get_label()) + "_continue";
@@ -273,9 +253,8 @@ void IRGenerator::generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFun
     IRFunc->add_instruction(label_end);
 }
 
-void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
-{
-    const auto& For = dynamic_cast<const ForStatement&>(Stmt);
+void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &For = dynamic_cast<const ForStatement &>(Stmt);
 
     std::string for_label_start = std::string(For.get_label()) + "_start";
     std::string for_label_continue = std::string(For.get_label()) + "_continue";
@@ -286,13 +265,11 @@ void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
     auto label_end = Ctx.getOrCreateLabel(for_end, true);
 
     // Now we generate a declaration or an expression
-    if (std::holds_alternative<Declaration *>(For.getInit()))
-    {
-        auto * decl = std::get<Declaration *>(For.getInit());
+    if (std::holds_alternative<Declaration *>(For.getInit())) {
+        auto *decl = std::get<Declaration *>(For.getInit());
         generateDeclaration(*decl, IRFunc);
-    } else if (std::holds_alternative<Expr *>(For.getInit()))
-    {
-        auto * expr = std::get<Expr *>(For.getInit());
+    } else if (std::holds_alternative<Expr *>(For.getInit())) {
+        auto *expr = std::get<Expr *>(For.getInit());
         generateExpression(*expr, IRFunc);
     }
 
@@ -300,8 +277,7 @@ void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
     IRFunc->add_instruction(label_start);
 
     // Evaluate condition
-    if (For.getCondition() != nullptr)
-    {
+    if (For.getCondition() != nullptr) {
         auto result = generateExpression(*For.getCondition(), IRFunc);
 
         // Jump to end if condition is false (zero)
@@ -316,8 +292,7 @@ void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
     IRFunc->add_instruction(label_continue);
 
     // Generate update of the variables
-    if (For.getPost() != nullptr)
-    {
+    if (For.getPost() != nullptr) {
         generateExpression(*For.getPost(), IRFunc);
     }
 
@@ -328,120 +303,175 @@ void IRGenerator::generateForStmt(const Statement& Stmt, ir::Function* IRFunc)
     IRFunc->add_instruction(label_end);
 }
 
-ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFunc)
-{
-    switch (Expr.getKind())
-    {
-    case Expr::Ek_Var:
-        {
-            const auto& var = dynamic_cast<const Var&>(Expr);
+void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc) {
+    const auto & Switch = dynamic_cast<const SwitchStatement&>(Stmt);
+
+    // Collect all cases and the default value
+    std::vector<CaseInfo> cases;
+    std::string defaultLabel;
+    bool hasDefault = false;
+    collectSwitchCases(Switch.get_body(), cases, defaultLabel, hasDefault);
+
+    // Get break label for switch statement
+    std::string switch_end = std::string(Switch.get_break_label());
+    auto* label_end = Ctx.getOrCreateLabel(switch_end, true);
+
+    // Evaluate the switch condition once
+    auto * switchValue = generateExpression(*Switch.get_condition(), IRFunc);
+
+    // Now generate the comparisons for each case
+    // also generate the jump, so we later just need
+    // to generate the labels
+    for (const auto & caseInfo : cases) {
+        // Evaluate the case constant
+        auto * caseValue = generateExpression(*caseInfo.value, IRFunc);
+
+        // Compare the result using the case from the switch, and the case
+        auto * cmp = Ctx.createICmpOp(
+            dynamic_cast<ir::Operand*>(switchValue),
+            dynamic_cast<ir::Operand*>(caseValue),
+            ir::ICmpOp::eq);
+        // add the comparison instruction
+        IRFunc->add_instruction(cmp);
+
+        // Jump to the case label if equal
+        auto* caseLabel = Ctx.getOrCreateLabel(caseInfo.label, true);
+        IRFunc->add_instruction(Ctx.createJNZ(cmp->getDestination(), caseLabel));
+    }
+
+    // no case matched, jump to default or end
+    if (hasDefault) {
+        auto * defLabel = Ctx.getOrCreateLabel(defaultLabel, true);
+        IRFunc->add_instruction(Ctx.createJump(defLabel));
+    } else {
+        IRFunc->add_instruction(Ctx.createJump(label_end));
+    }
+
+    // generate the body of the switch, it contains the case/default labels
+    // and also the statements, case/default only generates the labels
+    generateStatement(*Switch.get_body(), IRFunc);
+
+    // End label
+    IRFunc->add_instruction(label_end);
+}
+
+void IRGenerator::generateCaseStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    auto &caseStmt = dynamic_cast<const CaseStatement &>(Stmt);
+    std::string caseLabel = std::string(caseStmt.get_label());
+    IRFunc->add_instruction(Ctx.getOrCreateLabel(caseLabel, true));
+}
+
+void IRGenerator::generateDefaultStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    auto &defaultStmt = dynamic_cast<const DefaultStatement &>(Stmt);
+    std::string defaultLabel = std::string(defaultStmt.get_label());
+    IRFunc->add_instruction(Ctx.getOrCreateLabel(defaultLabel, true));
+}
+
+ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFunc) {
+    switch (Expr.getKind()) {
+        case Expr::Ek_Var: {
+            const auto &var = dynamic_cast<const Var &>(Expr);
             // Create a Var with the information from the one
             // of the AST
             return Ctx.getOrCreateVar(var.getName());
         }
-    case Expr::Ek_AssignmentOperator:
-        {
-            const auto& assignment = dynamic_cast<const AssignmentOperator&>(Expr);
-            const auto* left = assignment.getLeft();
-            const auto* right = assignment.getRight();
+        case Expr::Ek_AssignmentOperator: {
+            const auto &assignment = dynamic_cast<const AssignmentOperator &>(Expr);
+            const auto *left = assignment.getLeft();
+            const auto *right = assignment.getRight();
             // First we emit the right part of the assignment
-            auto* result = generateExpression(*right, IRFunc);
+            auto *result = generateExpression(*right, IRFunc);
             // Now we create a copy that we include in functions
-            auto* varop = generateExpression(*left, IRFunc);
+            auto *varop = generateExpression(*left, IRFunc);
             IRFunc->add_instruction(Ctx.createCopy(result, varop));
             return varop;
         }
-    case Expr::Ek_Int:
-        {
-            const auto& IntLit = dynamic_cast<const IntegerLiteral&>(Expr);
+        case Expr::Ek_Int: {
+            const auto &IntLit = dynamic_cast<const IntegerLiteral &>(Expr);
 
             // Create integer constant in IR
             return Ctx.createInt(IntLit.getValue());
         }
-    case Expr::Ek_UnaryOperator:
-        {
-            const auto& UnaryOp = dynamic_cast<const UnaryOperator&>(Expr);
+        case Expr::Ek_UnaryOperator: {
+            const auto &UnaryOp = dynamic_cast<const UnaryOperator &>(Expr);
 
             ir::UnaryOp::UnaryOpKind Kind;
-            switch (UnaryOp.getOperatorKind())
-            {
-            case UnaryOperator::UnaryOperatorKind::UopK_Negate:
-                Kind = ir::UnaryOp::UnaryOpKind::Neg;
-                break;
-            case UnaryOperator::UnaryOperatorKind::UopK_Complement:
-                Kind = ir::UnaryOp::UnaryOpKind::Complement;
-                break;
-            case UnaryOperator::UnaryOperatorKind::UopK_Not:
-                Kind = ir::UnaryOp::UnaryOpKind::Not;
-                break;
+            switch (UnaryOp.getOperatorKind()) {
+                case UnaryOperator::UnaryOperatorKind::UopK_Negate:
+                    Kind = ir::UnaryOp::UnaryOpKind::Neg;
+                    break;
+                case UnaryOperator::UnaryOperatorKind::UopK_Complement:
+                    Kind = ir::UnaryOp::UnaryOpKind::Complement;
+                    break;
+                case UnaryOperator::UnaryOperatorKind::UopK_Not:
+                    Kind = ir::UnaryOp::UnaryOpKind::Not;
+                    break;
             }
-            ir::Value* source = generateExpression(*UnaryOp.getExpr(), IRFunc);
-            ir::UnaryOp* UnOp = Ctx.createUnaryOp(dynamic_cast<ir::Operand*>(source), Kind);
+            ir::Value *source = generateExpression(*UnaryOp.getExpr(), IRFunc);
+            ir::UnaryOp *UnOp = Ctx.createUnaryOp(dynamic_cast<ir::Operand *>(source), Kind);
             if (IRFunc != nullptr)
                 IRFunc->add_instruction(UnOp);
             return UnOp->getDestination();
         }
-    case Expr::Ek_BinaryOperator:
-        {
-            const auto& BinaryOp = dynamic_cast<const BinaryOperator&>(Expr);
+        case Expr::Ek_BinaryOperator: {
+            const auto &BinaryOp = dynamic_cast<const BinaryOperator &>(Expr);
 
             ir::BinaryOp::BinaryOpKind Kind = ir::BinaryOp::BinaryOpKind::none;
             ir::ICmpOp::CmpOpKind CmpKind = ir::ICmpOp::CmpOpKind::none;
 
-            switch (BinaryOp.getOperatorKind())
-            {
-            case BinaryOperator::BoK_Add:
-                Kind = ir::BinaryOp::BinaryOpKind::Add;
-                break;
-            case BinaryOperator::BoK_Subtract:
-                Kind = ir::BinaryOp::BinaryOpKind::Sub;
-                break;
-            case BinaryOperator::BoK_Multiply:
-                Kind = ir::BinaryOp::BinaryOpKind::Mul;
-                break;
-            case BinaryOperator::BoK_Divide:
-                Kind = ir::BinaryOp::BinaryOpKind::Div;
-                break;
-            case BinaryOperator::BoK_Remainder:
-                Kind = ir::BinaryOp::BinaryOpKind::Rem;
-                break;
-            case BinaryOperator::BoK_BitwiseAnd:
-                Kind = ir::BinaryOp::BinaryOpKind::And;
-                break;
-            case BinaryOperator::BoK_BitwiseOr:
-                Kind = ir::BinaryOp::BinaryOpKind::Or;
-                break;
-            case BinaryOperator::BoK_BitwiseXor:
-                Kind = ir::BinaryOp::BinaryOpKind::Xor;
-                break;
-            case BinaryOperator::BoK_LeftShift:
-                Kind = ir::BinaryOp::BinaryOpKind::Sal;
-                break;
-            case BinaryOperator::BoK_RightShift:
-                Kind = ir::BinaryOp::BinaryOpKind::Sar;
-                break;
-            case BinaryOperator::BoK_LowerThan:
-                CmpKind = ir::ICmpOp::lt;
-                break;
-            case BinaryOperator::BoK_LowerEqual:
-                CmpKind = ir::ICmpOp::le;
-                break;
-            case BinaryOperator::BoK_GreaterThan:
-                CmpKind = ir::ICmpOp::gt;
-                break;
-            case BinaryOperator::BoK_GreaterEqual:
-                CmpKind = ir::ICmpOp::ge;
-                break;
-            case BinaryOperator::Bok_Equal:
-                CmpKind = ir::ICmpOp::eq;
-                break;
-            case BinaryOperator::Bok_NotEqual:
-                CmpKind = ir::ICmpOp::neq;
-                break;
-            case BinaryOperator::Bok_And:
-            case BinaryOperator::Bok_Or:
-            case BinaryOperator::BoK_None:
-                break;
+            switch (BinaryOp.getOperatorKind()) {
+                case BinaryOperator::BoK_Add:
+                    Kind = ir::BinaryOp::BinaryOpKind::Add;
+                    break;
+                case BinaryOperator::BoK_Subtract:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sub;
+                    break;
+                case BinaryOperator::BoK_Multiply:
+                    Kind = ir::BinaryOp::BinaryOpKind::Mul;
+                    break;
+                case BinaryOperator::BoK_Divide:
+                    Kind = ir::BinaryOp::BinaryOpKind::Div;
+                    break;
+                case BinaryOperator::BoK_Remainder:
+                    Kind = ir::BinaryOp::BinaryOpKind::Rem;
+                    break;
+                case BinaryOperator::BoK_BitwiseAnd:
+                    Kind = ir::BinaryOp::BinaryOpKind::And;
+                    break;
+                case BinaryOperator::BoK_BitwiseOr:
+                    Kind = ir::BinaryOp::BinaryOpKind::Or;
+                    break;
+                case BinaryOperator::BoK_BitwiseXor:
+                    Kind = ir::BinaryOp::BinaryOpKind::Xor;
+                    break;
+                case BinaryOperator::BoK_LeftShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sal;
+                    break;
+                case BinaryOperator::BoK_RightShift:
+                    Kind = ir::BinaryOp::BinaryOpKind::Sar;
+                    break;
+                case BinaryOperator::BoK_LowerThan:
+                    CmpKind = ir::ICmpOp::lt;
+                    break;
+                case BinaryOperator::BoK_LowerEqual:
+                    CmpKind = ir::ICmpOp::le;
+                    break;
+                case BinaryOperator::BoK_GreaterThan:
+                    CmpKind = ir::ICmpOp::gt;
+                    break;
+                case BinaryOperator::BoK_GreaterEqual:
+                    CmpKind = ir::ICmpOp::ge;
+                    break;
+                case BinaryOperator::Bok_Equal:
+                    CmpKind = ir::ICmpOp::eq;
+                    break;
+                case BinaryOperator::Bok_NotEqual:
+                    CmpKind = ir::ICmpOp::neq;
+                    break;
+                case BinaryOperator::Bok_And:
+                case BinaryOperator::Bok_Or:
+                case BinaryOperator::BoK_None:
+                    break;
             }
             // According to C standard the subexpressions of the same operation
             // are usually unsequenced, they can be evaluated in any order.
@@ -450,63 +480,59 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
             // we use `generateExpression` for them, that will add instructions
             // to the IR Function.
 
-            if (Kind != ir::BinaryOp::BinaryOpKind::none)
-            {
-                ir::Value* left = generateExpression(*BinaryOp.getLeft(), IRFunc);
-                ir::Value* right = generateExpression(*BinaryOp.getRight(), IRFunc);
+            if (Kind != ir::BinaryOp::BinaryOpKind::none) {
+                ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+                ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
 
-                ir::BinaryOp* BinOp = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(left),
-                                                         dynamic_cast<ir::Operand*>(right), Kind);
+                ir::BinaryOp *BinOp = Ctx.createBinaryOp(dynamic_cast<ir::Operand *>(left),
+                                                         dynamic_cast<ir::Operand *>(right), Kind);
                 if (IRFunc != nullptr)
                     IRFunc->add_instruction(BinOp);
                 return BinOp->getDestination();
             }
-            if (CmpKind != ir::ICmpOp::CmpOpKind::none)
-            {
-                ir::Value* left = generateExpression(*BinaryOp.getLeft(), IRFunc);
-                ir::Value* right = generateExpression(*BinaryOp.getRight(), IRFunc);
+            if (CmpKind != ir::ICmpOp::CmpOpKind::none) {
+                ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+                ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
 
-                ir::ICmpOp* CmpOp = Ctx.createICmpOp(dynamic_cast<ir::Operand*>(left),
-                                                     dynamic_cast<ir::Operand*>(right), CmpKind);
+                ir::ICmpOp *CmpOp = Ctx.createICmpOp(dynamic_cast<ir::Operand *>(left),
+                                                     dynamic_cast<ir::Operand *>(right), CmpKind);
                 if (IRFunc != nullptr)
                     IRFunc->add_instruction(CmpOp);
                 return CmpOp->getDestination();
             }
 
             // Short-Circuiting for && instruction
-            if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_And)
-            {
-                auto* false_label = Ctx.getOrCreateLabel("false_label");
-                auto* end_label = Ctx.getOrCreateLabel("end_label");
-                auto* result = Ctx.createReg();
-                auto* temp_left = Ctx.createReg();
-                auto* temp_right = Ctx.createReg();
-                auto* val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
-                auto* val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
+            if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_And) {
+                auto *false_label = Ctx.getOrCreateLabel("false_label");
+                auto *end_label = Ctx.getOrCreateLabel("end_label");
+                auto *result = Ctx.createReg();
+                auto *temp_left = Ctx.createReg();
+                auto *temp_right = Ctx.createReg();
+                auto *val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
+                auto *val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
 
-                ir::Value* left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+                ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
 
-                if (IRFunc != nullptr)
-                {
-                    auto* mov_left = Ctx.createCopy(left, temp_left);
+                if (IRFunc != nullptr) {
+                    auto *mov_left = Ctx.createCopy(left, temp_left);
                     IRFunc->add_instruction(mov_left);
 
-                    auto* jump_if_zero_left = Ctx.createJZ(temp_left, false_label);
+                    auto *jump_if_zero_left = Ctx.createJZ(temp_left, false_label);
                     IRFunc->add_instruction(jump_if_zero_left);
 
-                    ir::Value* right = generateExpression(*BinaryOp.getRight(), IRFunc);
-                    auto* mov_right = Ctx.createCopy(right, temp_right);
+                    ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
+                    auto *mov_right = Ctx.createCopy(right, temp_right);
                     IRFunc->add_instruction(mov_right);
 
-                    auto* jump_if_zero_right = Ctx.createJZ(temp_right, false_label);
+                    auto *jump_if_zero_right = Ctx.createJZ(temp_right, false_label);
                     IRFunc->add_instruction(jump_if_zero_right);
 
-                    auto* set_result_to_1 = Ctx.createCopy(val_1, result);
+                    auto *set_result_to_1 = Ctx.createCopy(val_1, result);
                     IRFunc->add_instruction(set_result_to_1);
 
-                    auto* jump_end = Ctx.createJump(end_label);
+                    auto *jump_end = Ctx.createJump(end_label);
                     IRFunc->add_instruction(jump_end);
-                    auto* set_result_to_0 = Ctx.createCopy(val_0, result);
+                    auto *set_result_to_0 = Ctx.createCopy(val_0, result);
                     IRFunc->add_instruction(false_label);
 
                     IRFunc->add_instruction(set_result_to_0);
@@ -517,41 +543,39 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
             }
 
             // Short-circuiting for || instruction
-            if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_Or)
-            {
-                auto* true_label = Ctx.getOrCreateLabel("true_label");
-                auto* end_label = Ctx.getOrCreateLabel("end_label");
-                auto* result = Ctx.createReg();
-                auto* temp_left = Ctx.createReg();
-                auto* temp_right = Ctx.createReg();
-                auto* val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
-                auto* val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
+            if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_Or) {
+                auto *true_label = Ctx.getOrCreateLabel("true_label");
+                auto *end_label = Ctx.getOrCreateLabel("end_label");
+                auto *result = Ctx.createReg();
+                auto *temp_left = Ctx.createReg();
+                auto *temp_right = Ctx.createReg();
+                auto *val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
+                auto *val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
 
-                ir::Value* left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+                ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
 
-                if (IRFunc != nullptr)
-                {
-                    auto* mov_left = Ctx.createCopy(left, temp_left);
+                if (IRFunc != nullptr) {
+                    auto *mov_left = Ctx.createCopy(left, temp_left);
                     IRFunc->add_instruction(mov_left);
 
-                    auto* jump_if_not_zero_left = Ctx.createJNZ(temp_left, true_label);
+                    auto *jump_if_not_zero_left = Ctx.createJNZ(temp_left, true_label);
                     IRFunc->add_instruction(jump_if_not_zero_left);
 
-                    ir::Value* right = generateExpression(*BinaryOp.getRight(), IRFunc);
+                    ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
 
-                    auto* mov_right = Ctx.createCopy(right, temp_right);
+                    auto *mov_right = Ctx.createCopy(right, temp_right);
                     IRFunc->add_instruction(mov_right);
 
-                    auto* jump_if_not_zero_right = Ctx.createJNZ(temp_right, true_label);
+                    auto *jump_if_not_zero_right = Ctx.createJNZ(temp_right, true_label);
                     IRFunc->add_instruction(jump_if_not_zero_right);
 
-                    auto* set_result_to_0 = Ctx.createCopy(val_0, result);
+                    auto *set_result_to_0 = Ctx.createCopy(val_0, result);
                     IRFunc->add_instruction(set_result_to_0);
 
-                    auto* jump_end = Ctx.createJump(end_label);
+                    auto *jump_end = Ctx.createJump(end_label);
                     IRFunc->add_instruction(jump_end);
 
-                    auto* set_result_to_1 = Ctx.createCopy(val_1, result);
+                    auto *set_result_to_1 = Ctx.createCopy(val_1, result);
                     IRFunc->add_instruction(true_label);
 
                     IRFunc->add_instruction(set_result_to_1);
@@ -563,31 +587,28 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
 
             break;
         }
-    case Expr::Ek_PrefixOperator:
-        {
-            const auto& PrefixOp = dynamic_cast<const PrefixOperator&>(Expr);
+        case Expr::Ek_PrefixOperator: {
+            const auto &PrefixOp = dynamic_cast<const PrefixOperator &>(Expr);
 
             // Get the variable being operated on
-            ir::Value* var = generateExpression(*PrefixOp.getExpr(), IRFunc);
-            auto* one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+            ir::Value *var = generateExpression(*PrefixOp.getExpr(), IRFunc);
+            auto *one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
 
-            ir::BinaryOp* increment_instruction = nullptr;
+            ir::BinaryOp *increment_instruction = nullptr;
 
             // For prefix operators, we first update the variable, then return its new value
-            switch (PrefixOp.getOperatorKind())
-            {
-            case PrefixOperator::POK_PreIncrement:
-                increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
-                                                           one, ir::BinaryOp::Add);
-                break;
-            case PrefixOperator::POK_PreDecrement:
-                increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
-                                                           one, ir::BinaryOp::Sub);
-                break;
+            switch (PrefixOp.getOperatorKind()) {
+                case PrefixOperator::POK_PreIncrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand *>(var),
+                                                               one, ir::BinaryOp::Add);
+                    break;
+                case PrefixOperator::POK_PreDecrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand *>(var),
+                                                               one, ir::BinaryOp::Sub);
+                    break;
             }
 
-            if (IRFunc != nullptr && increment_instruction != nullptr)
-            {
+            if (IRFunc != nullptr && increment_instruction != nullptr) {
                 IRFunc->add_instruction(increment_instruction);
                 // Copy the result back to the variable
                 IRFunc->add_instruction(Ctx.createCopy(increment_instruction->getDestination(), var));
@@ -595,38 +616,34 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
 
             return var; // Return the updated variable
         }
-    case Expr::Ek_PostfixOperator:
-        {
-            const auto& PostfixOp = dynamic_cast<const PostfixOperator&>(Expr);
+        case Expr::Ek_PostfixOperator: {
+            const auto &PostfixOp = dynamic_cast<const PostfixOperator &>(Expr);
 
             // Get the variable being operated on
-            ir::Value* var = generateExpression(*PostfixOp.getExpr(), IRFunc);
-            auto* one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+            ir::Value *var = generateExpression(*PostfixOp.getExpr(), IRFunc);
+            auto *one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
 
             // For postfix operators, we save the old value, update the variable, then return the old value
-            auto* old_value = Ctx.createReg();
-            ir::BinaryOp* increment_instruction = nullptr;
+            auto *old_value = Ctx.createReg();
+            ir::BinaryOp *increment_instruction = nullptr;
 
-            if (IRFunc != nullptr)
-            {
+            if (IRFunc != nullptr) {
                 // Save the current value
                 IRFunc->add_instruction(Ctx.createCopy(var, old_value));
             }
 
-            switch (PostfixOp.getOperatorKind())
-            {
-            case PostfixOperator::POK_PostIncrement:
-                increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
-                                                           one, ir::BinaryOp::Add);
-                break;
-            case PostfixOperator::POK_PostDecrement:
-                increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand*>(var),
-                                                           one, ir::BinaryOp::Sub);
-                break;
+            switch (PostfixOp.getOperatorKind()) {
+                case PostfixOperator::POK_PostIncrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand *>(var),
+                                                               one, ir::BinaryOp::Add);
+                    break;
+                case PostfixOperator::POK_PostDecrement:
+                    increment_instruction = Ctx.createBinaryOp(dynamic_cast<ir::Operand *>(var),
+                                                               one, ir::BinaryOp::Sub);
+                    break;
             }
 
-            if (IRFunc != nullptr && increment_instruction != nullptr)
-            {
+            if (IRFunc != nullptr && increment_instruction != nullptr) {
                 IRFunc->add_instruction(increment_instruction);
                 // Copy the result back to the variable
                 IRFunc->add_instruction(Ctx.createCopy(increment_instruction->getDestination(), var));
@@ -634,19 +651,18 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
 
             return old_value; // Return the old value (before increment/decrement)
         }
-    case Expr::Ek_ConditionalOperator:
-        {
-            const auto& cond_expr = dynamic_cast<const ConditionalExpr&>(Expr);
+        case Expr::Ek_ConditionalOperator: {
+            const auto &cond_expr = dynamic_cast<const ConditionalExpr &>(Expr);
             // Results that will be returned
-            ir::Value* Result, *temp1, *temp2;
+            ir::Value *Result, *temp1, *temp2;
             // labels
-            auto * e2_label = Ctx.getOrCreateLabel("e2_label");
-            auto * end_label = Ctx.getOrCreateLabel("end_label");
+            auto *e2_label = Ctx.getOrCreateLabel("e2_label");
+            auto *end_label = Ctx.getOrCreateLabel("end_label");
             // Result must be a register
             Result = Ctx.createReg();
 
             // first generate the conditional statement
-            auto * cond_result = generateExpression(*cond_expr.getCondition(), IRFunc);
+            auto *cond_result = generateExpression(*cond_expr.getCondition(), IRFunc);
             // If met, jump to the e2
             IRFunc->add_instruction(Ctx.createJZ(cond_result, e2_label));
             // now we generate the code for the first statement, and obtain
@@ -665,4 +681,73 @@ ir::Value* IRGenerator::generateExpression(const Expr& Expr, ir::Function* IRFun
     }
 
     return nullptr; // Should not reach here
+}
+
+void IRGenerator::collectSwitchCases(
+    const Statement *stmt,
+    std::vector<CaseInfo> &cases,
+    std::string &defaultLabel,
+    bool &hasDefault) {
+    if (!stmt) return;
+
+    switch (stmt->getKind()) {
+        case Statement::SK_Case: {
+            const auto *caseStmt = dynamic_cast<const CaseStatement *>(stmt);
+            CaseInfo info;
+            info.value = caseStmt->getValue();
+            info.label = std::string(caseStmt->get_label());
+            cases.push_back(info);
+            break;
+        }
+        case Statement::SK_Default: {
+            const auto *defaultStmt = dynamic_cast<const DefaultStatement *>(stmt);
+            defaultLabel = std::string(defaultStmt->get_label());
+            hasDefault = true;
+            break;
+        }
+
+        case Statement::SK_Compound: {
+            // Recursively scan compound statement's children
+            const auto *compound = dynamic_cast<const CompoundStatement *>(stmt);
+            for (const auto &item: *compound) {
+                if (std::holds_alternative<Statement *>(item)) {
+                    collectSwitchCases(std::get<Statement *>(item), cases, defaultLabel, hasDefault);
+                }
+            }
+            break;
+        }
+
+        case Statement::SK_If: {
+            // Cases can appear inside if statements within switch
+            const auto *ifStmt = dynamic_cast<const IfStatement *>(stmt);
+            collectSwitchCases(ifStmt->getThenSt(), cases, defaultLabel, hasDefault);
+            if (ifStmt->getElseSt()) {
+                collectSwitchCases(ifStmt->getElseSt(), cases, defaultLabel, hasDefault);
+            }
+            break;
+        }
+
+        // For loops, while, etc. - cases could be inside
+        case Statement::SK_While: {
+            const auto *whileStmt = dynamic_cast<const WhileStatement *>(stmt);
+            collectSwitchCases(whileStmt->getBody(), cases, defaultLabel, hasDefault);
+            break;
+        }
+
+        case Statement::SK_DoWhile: {
+            const auto *doWhile = dynamic_cast<const DoWhileStatement *>(stmt);
+            collectSwitchCases(doWhile->getBody(), cases, defaultLabel, hasDefault);
+            break;
+        }
+
+        case Statement::SK_For: {
+            const auto *forStmt = dynamic_cast<const ForStatement *>(stmt);
+            collectSwitchCases(forStmt->getBody(), cases, defaultLabel, hasDefault);
+            break;
+        }
+
+        // Other statements don't contain cases
+        default:
+            break;
+    }
 }

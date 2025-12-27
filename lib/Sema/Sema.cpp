@@ -1,26 +1,23 @@
-
 #include "mycc/Sema/Sema.hpp"
 #include <cassert>
+#include <ranges>
 
 using namespace mycc;
 
-void Sema::enterFunction()
-{
+void Sema::enterFunction() {
     FunctionLabels.clear();
     GotoLabels.clear();
 }
 
-void Sema::exitFunction()
-{
+void Sema::exitFunction() {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
         checkGotoLabelsCorrectlyPointToFunction();
     }
 }
 
-void Sema::checkGotoLabelsCorrectlyPointToFunction()
-{
-    for (const auto& label : GotoLabels) {
+void Sema::checkGotoLabelsCorrectlyPointToFunction() {
+    for (const auto &label: GotoLabels) {
         if (!FunctionLabels.contains(label)) {
             Diags.report(SMLoc(), diag::err_undefined_label, label.str());
             exit(1);
@@ -28,13 +25,11 @@ void Sema::checkGotoLabelsCorrectlyPointToFunction()
     }
 }
 
-void Sema::enterScope()
-{
+void Sema::enterScope() {
     CurrentScope = new Scope(CurrentScope);
 }
 
-void Sema::exitScope()
-{
+void Sema::exitScope() {
     // check first there's a current scope
     assert(CurrentScope && "Can't exit non-existing scope");
 
@@ -51,107 +46,321 @@ std::string Sema::generateLoopLabel() {
     return "loop_" + std::to_string(LoopLabelCounter++);
 }
 
-void Sema::assignLoopLabels(Function& F) {
-    // Stack holds base loop labels for nested loops
-    std::vector<std::string> loopStack;
+void Sema::assignLoopLabels(Function &F) {
+    // Labels for the breaks
+    std::vector<BreakableContext> breakableStack;
 
     // Traverse all items in the function body
-    for (auto& item : F) {
-        traverseBlockItem(item, loopStack);
+    for (auto &item: F) {
+        traverseBlockItem(item, breakableStack);
     }
 }
 
-void Sema::traverseBlockItem(BlockItem& item, std::vector<std::string>& loopStack) {
-    if (std::holds_alternative<Statement*>(item)) {
-        traverseStatement(std::get<Statement*>(item), loopStack);
+void Sema::traverseBlockItem(BlockItem &item, std::vector<BreakableContext> &breakableStack) {
+    if (std::holds_alternative<Statement *>(item)) {
+        traverseStatement(std::get<Statement *>(item), breakableStack);
     }
 }
 
-void Sema::traverseStatement(Statement* stmt, std::vector<std::string>& loopStack) {
+std::string Sema::generateSwitchLabel() {
+    return "switch_" + std::to_string(SwitchLabelCounter++);
+}
+
+std::string Sema::generateCaseLabel() {
+    return "case_" + std::to_string(CaseLabelCounter++);
+}
+
+std::string Sema::generateDefaultLabel() {
+    return "default_" + std::to_string(DefaultLabelCounter++);
+}
+
+bool Sema::isConstantExpression(Expr *expr) {
+    return expr->getKind() == Expr::Ek_Int;
+}
+
+int64_t Sema::evaluateConstantExpression(Expr *expr) {
+    if (auto *intLit = dynamic_cast<IntegerLiteral *>(expr)) {
+        return intLit->getValue().getSExtValue();
+    }
+    // this should never be reached since we only allow constant integers
+    return 0;
+}
+
+void Sema::validateSwitchBody(Statement *body,
+                              std::set<int64_t> &seenCaseValues,
+                              bool &hasDefault) {
+    if (!body) return;
+
+    switch (body->getKind()) {
+        case Statement::SK_Case: {
+            auto *caseStmt = dynamic_cast<CaseStatement *>(body);
+
+            // First check, case value must be a constant integer
+            Expr *value = caseStmt->getValue();
+            if (!isConstantExpression(value)) {
+                Diags.report(SMLoc(), diag::err_case_value_not_constant);
+                exit(1);
+            }
+
+            // Second check, look for duplicated cases
+            int64_t caseValue = evaluateConstantExpression(value);
+            if (seenCaseValues.contains(caseValue)) {
+                Diags.report(SMLoc(), diag::err_duplicate_case_value, std::to_string(caseValue));
+                exit(1);
+            }
+            seenCaseValues.insert(caseValue);
+            break;
+        }
+
+        case Statement::SK_Default: {
+            // Check 3: It has multiple defaults
+            if (hasDefault) {
+                Diags.report(SMLoc(), diag::err_multiple_default_in_switch);
+                exit(1);
+            }
+            hasDefault = true;
+            break;
+        }
+
+        case Statement::SK_Compound: {
+            auto *compound = dynamic_cast<CompoundStatement *>(body);
+            Statement *prevStmt = nullptr;
+
+            // Go over each item to validate the body
+            for (auto &item: *compound) {
+                // Check if current item is a Declaration following case/default
+                if (std::holds_alternative<Declaration *>(item)) {
+                    if (prevStmt &&
+                        (prevStmt->getKind() == Statement::SK_Case ||
+                         prevStmt->getKind() == Statement::SK_Default)) {
+                        if (!avoid_errors) {
+                            Diags.report(SMLoc(), diag::err_declaration_after_case_label);
+                            exit(1);
+                        }
+                    }
+                    // Reset prevStmt since a declaration is not a statement
+                    prevStmt = nullptr;
+                } else if (std::holds_alternative<Statement *>(item)) {
+                    Statement *stmt = std::get<Statement *>(item);
+                    validateSwitchBody(stmt, seenCaseValues, hasDefault);
+                    prevStmt = stmt;
+                }
+            }
+            break;
+        }
+
+        // Recursively check nested statements
+        case Statement::SK_If: {
+            auto *ifStmt = dynamic_cast<IfStatement *>(body);
+            validateSwitchBody(ifStmt->getThenSt(), seenCaseValues, hasDefault);
+            if (ifStmt->getElseSt())
+                validateSwitchBody(ifStmt->getElseSt(), seenCaseValues, hasDefault);
+            break;
+        }
+
+        case Statement::SK_While: {
+            auto *whileStmt = dynamic_cast<WhileStatement *>(body);
+            validateSwitchBody(whileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_DoWhile: {
+            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(body);
+            validateSwitchBody(doWhileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_For: {
+            auto *forStmt = dynamic_cast<ForStatement *>(body);
+            validateSwitchBody(forStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+    }
+}
+
+void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &breakableStack) {
     if (!stmt) return;
 
     switch (stmt->getKind()) {
         case Statement::SK_While: {
-            auto* whileStmt = static_cast<WhileStatement*>(stmt);
+            auto *whileStmt = dynamic_cast<WhileStatement *>(stmt);
             std::string baseLabel = generateLoopLabel();
             whileStmt->set_label(baseLabel);
 
             // Push base label onto stack
-            loopStack.push_back(baseLabel);
+            BreakableContext ctx;
+            ctx.base_label = baseLabel;
+            ctx.is_loop = true;
+            breakableStack.push_back(ctx);
 
             // Traverse body
-            traverseStatement(whileStmt->getBody(), loopStack);
+            traverseStatement(whileStmt->getBody(), breakableStack);
 
             // Pop from stack
-            loopStack.pop_back();
+            breakableStack.pop_back();
             break;
         }
 
         case Statement::SK_DoWhile: {
-            auto* doWhileStmt = static_cast<DoWhileStatement*>(stmt);
+            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(stmt);
             std::string baseLabel = generateLoopLabel();
             doWhileStmt->set_label(baseLabel);
 
-            loopStack.push_back(baseLabel);
-            traverseStatement(doWhileStmt->getBody(), loopStack);
-            loopStack.pop_back();
+            // Push base label onto stack
+            BreakableContext ctx;
+            ctx.base_label = baseLabel;
+            ctx.is_loop = true;
+            breakableStack.push_back(ctx);
+
+            // Traverse body
+            traverseStatement(doWhileStmt->getBody(), breakableStack);
+
+            // Pop from stack
+            breakableStack.pop_back();
             break;
         }
 
         case Statement::SK_For: {
-            auto* forStmt = static_cast<ForStatement*>(stmt);
+            auto *forStmt = dynamic_cast<ForStatement *>(stmt);
             std::string baseLabel = generateLoopLabel();
             forStmt->set_label(baseLabel);
 
-            loopStack.push_back(baseLabel);
-            traverseStatement(forStmt->getBody(), loopStack);
-            loopStack.pop_back();
+            // Push base label onto stack
+            BreakableContext ctx;
+            ctx.base_label = baseLabel;
+            ctx.is_loop = true;
+            breakableStack.push_back(ctx);
+
+            // Traverse body
+            traverseStatement(forStmt->getBody(), breakableStack);
+
+            // Pop from stack
+            breakableStack.pop_back();
             break;
         }
+        case Statement::SK_Switch: {
+            auto *switchStmt = dynamic_cast<SwitchStatement *>(stmt);
+            std::string switchLabel = generateSwitchLabel();
+            switchStmt->set_break_label(switchLabel + "_end");
 
+            std::set<int64_t> seenCaseValues;
+            bool hasDefault = false;
+            validateSwitchBody(switchStmt->get_body(), seenCaseValues, hasDefault);
+
+            // Push switch context
+            BreakableContext ctx;
+            ctx.base_label = switchLabel;
+            ctx.is_loop = false;
+            breakableStack.push_back(ctx);
+
+            traverseStatement(switchStmt->get_body(), breakableStack);
+
+            breakableStack.pop_back();
+            break;
+        }
+        case Statement::SK_Case: {
+            auto *caseStmt = dynamic_cast<CaseStatement *>(stmt);
+
+            // Check if we're inside any switch by searching the stack
+            bool insideSwitch = false;
+            for (const auto &ctx: breakableStack) {
+                if (!ctx.is_loop) {
+                    // Found a switch
+                    insideSwitch = true;
+                    break;
+                }
+            }
+
+            if (!insideSwitch) {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_case_not_in_switch);
+                    exit(1);
+                }
+            } else {
+                std::string caseLabel = generateCaseLabel();
+                caseStmt->set_label(caseLabel);
+            }
+            break;
+        }
+        case Statement::SK_Default: {
+            auto *defaultStmt = dynamic_cast<DefaultStatement *>(stmt);
+
+            // Check if we're inside any switch by searching the stack
+            bool insideSwitch = false;
+            for (const auto &ctx: breakableStack) {
+                if (!ctx.is_loop) {
+                    // Found a switch
+                    insideSwitch = true;
+                    break;
+                }
+            }
+
+            if (!insideSwitch) {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_default_not_in_switch);
+                    exit(1);
+                }
+            } else {
+                std::string defaultLabel = generateDefaultLabel();
+                defaultStmt->set_label(defaultLabel);
+            }
+            break;
+        }
         case Statement::SK_Break: {
-            auto* breakStmt = static_cast<BreakStatement*>(stmt);
-            if (loopStack.empty()) {
+            auto *breakStmt = dynamic_cast<BreakStatement *>(stmt);
+
+            if (breakableStack.empty()) {
                 if (!avoid_errors) {
                     Diags.report(SMLoc(), diag::err_break_not_in_loop);
                     exit(1);
                 }
             } else {
-                // Break jumps to end of loop: loop_N_end
-                std::string targetLabel = loopStack.back() + "_end";
+                // Break jumps to the innermost loop or switch
+                std::string targetLabel = breakableStack.back().get_break_label();
                 breakStmt->set_label(targetLabel);
             }
             break;
         }
 
         case Statement::SK_Continue: {
-            auto* continueStmt = static_cast<ContinueStatement*>(stmt);
-            if (loopStack.empty()) {
+            auto *continueStmt = dynamic_cast<ContinueStatement *>(stmt);
+
+            if (breakableStack.empty()) {
                 if (!avoid_errors) {
                     Diags.report(SMLoc(), diag::err_continue_not_in_loop);
                     exit(1);
                 }
             } else {
-                // Continue jumps to start of loop: loop_N_start
-                std::string targetLabel = loopStack.back() + "_continue";
-                continueStmt->set_label(targetLabel);
+                bool foundLoop = false;
+                for (auto &breakable: std::ranges::reverse_view(breakableStack)) {
+                    if (breakable.is_loop) {
+                        // Continue jumps to continue label of innermost LOOP
+                        std::string targetLabel = breakable.get_continue_label();
+                        continueStmt->set_label(targetLabel);
+                        foundLoop = true;
+                        break;
+                    }
+                }
+
+                if (!foundLoop && !avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_continue_not_in_loop);
+                    exit(1);
+                }
             }
             break;
         }
 
         case Statement::SK_If: {
-            auto* ifStmt = static_cast<IfStatement*>(stmt);
-            traverseStatement(ifStmt->getThenSt(), loopStack);
+            auto *ifStmt = dynamic_cast<IfStatement *>(stmt);
+            traverseStatement(ifStmt->getThenSt(), breakableStack);
             if (ifStmt->getElseSt()) {
-                traverseStatement(ifStmt->getElseSt(), loopStack);
+                traverseStatement(ifStmt->getElseSt(), breakableStack);
             }
             break;
         }
 
         case Statement::SK_Compound: {
-            auto* compoundStmt = static_cast<CompoundStatement*>(stmt);
-            for (auto& item : *compoundStmt) {
-                traverseBlockItem(item, loopStack);
+            auto *compoundStmt = dynamic_cast<CompoundStatement *>(stmt);
+            for (auto &item: *compoundStmt) {
+                traverseBlockItem(item, breakableStack);
             }
             break;
         }
@@ -167,27 +376,27 @@ void Sema::initialize() {
     VariableCounter = 0;
 }
 
-Program * Sema::actOnProgramDeclaration(FuncList &Funcs) {
-    auto * p = Context.createProgram<Program>();
+Program *Sema::actOnProgramDeclaration(FuncList &Funcs) {
+    auto *p = Context.createProgram<Program>();
     p->add_functions(Funcs);
     return p;
 }
 
-Function * Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
-    auto* func = Context.createFunction<Function>(Name, Loc);
+Function *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
+    auto *func = Context.createFunction<Function>(Name, Loc);
 
     return func;
 }
 
-bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
+bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
     // Generate unique name and track it
     StringRef originalName = Name;
     std::string uniqueName = generateUniqueVarName(originalName);
     pushVariableName(originalName, uniqueName);
 
     // Create declaration with unique name
-    auto* var = Context.createExpression<Var>(Loc, uniqueName);
-    auto* decl = Context.createDeclaration<Declaration>(Loc, var);
+    auto *var = Context.createExpression<Var>(Loc, uniqueName);
+    auto *decl = Context.createDeclaration<Declaration>(Loc, var);
 
     // Add to current scope if it exists, using original name as key
     if (CurrentScope) {
@@ -205,94 +414,97 @@ bool Sema::actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name) {
         CurrentScope->addDeclaredVariable(originalName);
     }
 
-    Items.push_back(decl);
+    Items.emplace_back(decl);
     return false;
 }
 
-void Sema::actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr *RetVal) {
-    Items.push_back(Context.createStatement<ReturnStatement>(RetVal));
+void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) {
+    Items.emplace_back(Context.createStatement<ReturnStatement>(RetVal));
 }
 
-void Sema::actOnNullStatement(BlockItems& Items, SMLoc Loc) {
-    Items.push_back(Context.createStatement<NullStatement>());
+void Sema::actOnNullStatement(BlockItems &Items, SMLoc Loc) {
+    Items.emplace_back(Context.createStatement<NullStatement>());
 }
 
-void Sema::actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr *Expr) {
-    Items.push_back(Context.createStatement<ExpressionStatement>(Expr));
+void Sema::actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) {
+    Items.emplace_back(Context.createStatement<ExpressionStatement>(Expr));
 }
 
-void Sema::actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
-    Items.push_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
+void Sema::actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
+    Items.emplace_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
 }
 
-void Sema::actOnCompoundStatement(BlockItems& Items, SMLoc Loc, BlockItems& compoundStatement) {
-    Items.push_back(Context.createStatement<CompoundStatement>(compoundStatement));
+void Sema::actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) {
+    Items.emplace_back(Context.createStatement<CompoundStatement>(compoundStatement));
 }
 
-void Sema::actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
-{
-    if (!avoid_errors)
-    {
+void Sema::actOnLabelStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
+    if (!avoid_errors) {
         // The Labels are unique for each function, we must
         // ensure this property, throwing an error in case
         // an existing label has been declared again.
-        if (FunctionLabels.contains(Label))
-        {
+        if (FunctionLabels.contains(Label)) {
             Diags.report(Loc, diag::err_existing_label, Label.str());
             exit(1);
         }
     }
     FunctionLabels.insert(Label);
-    Items.push_back(Context.createStatement<LabelStatement>(Label));
+    Items.emplace_back(Context.createStatement<LabelStatement>(Label));
 }
 
-void Sema::actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label)
-{
+void Sema::actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
     GotoLabels.insert(Label);
-    Items.push_back(Context.createStatement<GotoStatement>(Label));
+    Items.emplace_back(Context.createStatement<GotoStatement>(Label));
 }
 
-void Sema::actOnWhileStatement(BlockItems& Items, SMLoc Loc, Expr *Cond, Statement *Body)
-{
-    Items.push_back(Context.createStatement<WhileStatement>(Cond, Body));
+void Sema::actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+    Items.emplace_back(Context.createStatement<WhileStatement>(Cond, Body));
 }
 
-void Sema::actOnDoWhileStatement(BlockItems& Items, SMLoc Loc, Statement *Body, Expr *Cond)
-{
-    Items.push_back(Context.createStatement<DoWhileStatement>(Body, Cond));
+void Sema::actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) {
+    Items.emplace_back(Context.createStatement<DoWhileStatement>(Body, Cond));
 }
 
-void Sema::actOnForStatement(BlockItems& Items, SMLoc Loc, ForInit& Init, Expr *Cond, Expr *Post, Statement *Body)
-{
-    Items.push_back(Context.createStatement<ForStatement>(Init, Cond, Post, Body));
+void Sema::actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body) {
+    Items.emplace_back(Context.createStatement<ForStatement>(Init, Cond, Post, Body));
 }
 
-void Sema::actOnBreakStatement(BlockItems& Items, SMLoc Loc)
-{
-    Items.push_back(Context.createStatement<BreakStatement>());
+void Sema::actOnBreakStatement(BlockItems &Items, SMLoc Loc) {
+    Items.emplace_back(Context.createStatement<BreakStatement>());
 }
 
-void Sema::actOnContinueStatement(BlockItems& Items, SMLoc Loc)
-{
-    Items.push_back(Context.createStatement<ContinueStatement>());
+void Sema::actOnContinueStatement(BlockItems &Items, SMLoc Loc) {
+    Items.emplace_back(Context.createStatement<ContinueStatement>());
 }
 
-IntegerLiteral* Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
+void Sema::actOnDefaultStatement(BlockItems &Items, SMLoc Loc) {
+    Items.emplace_back(Context.createStatement<DefaultStatement>());
+}
+
+void Sema::actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) {
+    Items.emplace_back(Context.createStatement<CaseStatement>(Cond));
+}
+
+void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+    Items.emplace_back(Context.createStatement<SwitchStatement>(Cond, Body));
+}
+
+IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     uint8_t Radix = 10;
 
     llvm::APInt Value(64, Literal, Radix);
     return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value, false));
 }
 
-UnaryOperator* Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr) {
+UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) {
     return Context.createExpression<UnaryOperator>(Loc, Kind, expr);
 }
 
-BinaryOperator* Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr* left, Expr* right) {
+BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) {
     return Context.createExpression<BinaryOperator>(Loc, Kind, left, right);
 }
 
-AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
+AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) {
     if (!avoid_errors) {
         if (left->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -303,7 +515,7 @@ AssignmentOperator* Sema::actOnAssignment(SMLoc Loc, Expr* left, Expr* right) {
     return Context.createExpression<AssignmentOperator>(Loc, left, right);
 }
 
-PrefixOperator* Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr* expr) {
+PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -314,7 +526,7 @@ PrefixOperator* Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKin
     return Context.createExpression<PrefixOperator>(Loc, Kind, expr);
 }
 
-PostfixOperator* Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr* expr) {
+PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -325,21 +537,20 @@ PostfixOperator* Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixO
     return Context.createExpression<PostfixOperator>(Loc, Kind, expr);
 }
 
-Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
+Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     // Look up the variable in current scope
     if (CurrentScope) {
         // We make a lookup by name, this lookup will traverse
         // all the scopes from current through parents looking
         /// for the variable.
-        Declaration* decl = CurrentScope->lookup(Name);
+        Declaration *decl = CurrentScope->lookup(Name);
         if (!decl) {
             if (!avoid_errors) {
                 // Issue error for potentially undefined variable
                 Diags.report(Loc, diag::err_var_used_before_declared, Name.str());
                 return nullptr;
             }
-        }
-        else {
+        } else {
             // Variable exists, get the unique name for it
             std::string uniqueName = getCurrentUniqueVarName(Name);
             return Context.createExpression<Var>(Loc, uniqueName);
@@ -349,7 +560,7 @@ Var* Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     return Context.createExpression<Var>(Loc, Name);
 }
 
-ConditionalExpr * Sema::actOnTernaryOperator(SMLoc, Expr* left, Expr* middle, Expr* right) {
+ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) {
     return Context.createExpression<ConditionalExpr>(left, middle, right);
 }
 
@@ -357,7 +568,7 @@ std::string Sema::generateUniqueVarName(StringRef originalName) {
     return originalName.str() + "_" + std::to_string(VariableCounter++);
 }
 
-void Sema::pushVariableName(StringRef originalName, const std::string& uniqueName) {
+void Sema::pushVariableName(StringRef originalName, const std::string &uniqueName) {
     // We keep unique names instead of the original ones
     // it will be easier for later generating the intermmediate
     // representation
@@ -373,12 +584,12 @@ std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
     return originalName.str();
 }
 
-void Sema::popVariablesFromScope(const std::vector<std::string>& declaredVars) {
+void Sema::popVariablesFromScope(const std::vector<std::string> &declaredVars) {
     // Once we go out from a scope (a block), we have to
     // remove all the declared variables from the variable
     // name stacks, so we do not keep the unique generated
     // names.
-    for (const std::string& varName : declaredVars) {
+    for (const std::string &varName: declaredVars) {
         auto it = VariableNameStacks.find(varName);
         if (it != VariableNameStacks.end() && !it->second.empty()) {
             it->second.pop_back();

@@ -45,6 +45,9 @@ public:
         SK_While,
         SK_DoWhile,
         SK_For,
+        SK_Case,
+        SK_Default,
+        SK_Switch,
         SK_Null,
     };
 private:
@@ -418,6 +421,81 @@ public:
 
     static bool classof(const Statement* S) {
         return S->getKind() == SK_For;
+    }
+};
+
+class CaseStatement : public Statement
+{
+    Expr* Value; // Constant expression checked
+    std::string label; // the label of the case for jumping
+public:
+    CaseStatement(Expr* value) :
+        Statement(SK_Case), Value(value)
+    {
+    }
+
+    ~CaseStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+
+    Expr* getValue() const { return Value; }
+};
+
+class DefaultStatement : public Statement
+{
+    std::string label; // Internal label for Jumping
+public:
+    DefaultStatement() : Statement(SK_Default)
+    {
+    }
+
+    ~DefaultStatement() override = default;
+
+    void set_label(std::string label)
+    {
+        this->label = label;
+    }
+
+    std::string_view get_label() const
+    {
+        return label;
+    }
+};
+
+
+class SwitchStatement : public Statement
+{
+    Expr* Condition; // Controlling expression
+    Statement* Body; // Usually a switch will be a CompoundStatement containing case labels
+    std::string break_label; // Label to jump to when breaking
+public:
+    SwitchStatement(Expr* condition, Statement* body) :
+        Statement(SK_Switch), Condition(condition), Body(body)
+    {
+    }
+
+    Expr* get_condition() const {
+        return Condition;
+    }
+
+    Statement* get_body() const {
+        return Body;
+    }
+
+    void set_break_label(std::string label) {
+        this->break_label = label;
+    }
+
+    std::string_view get_break_label() const {
+        return this->break_label;
     }
 };
 

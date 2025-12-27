@@ -164,7 +164,7 @@ bool Parser::parseStatement(BlockItems& Items) {
     {
         return parseDoWhileStmt(Items);
     }
-    if (Tok.is(tok::kw_for))
+    if (Tok.is(tok::kw_for) || Tok.is(tok::kw_tree))
     {
         return parseForStmt(Items);
     }
@@ -187,6 +187,15 @@ bool Parser::parseStatement(BlockItems& Items) {
             return true;
         Actions.actOnContinueStatement(Items, Loc);
         return false;
+    }
+    if (Tok.is(tok::kw_case)) {
+        return parseCaseStatement(Items);
+    }
+    if (Tok.is(tok::kw_default)) {
+        return parseDefaultStatement(Items);
+    }
+    if (Tok.is(tok::kw_switch)) {
+        return parseSwitchStatement(Items);
     }
     if (Tok.is(tok::identifier))
     {
@@ -414,7 +423,7 @@ bool Parser::parseForStmt(BlockItems& Items)
     Statement * Body = nullptr;
     bool hasDeclaration = false;
 
-    if (consume(tok::kw_for))
+    if (consume(tok::kw_for) && consume(tok::kw_tree))
         return true;
 
     if (consume(tok::l_paren))
@@ -495,6 +504,65 @@ bool Parser::parseForStmt(BlockItems& Items)
         Actions.exitScope();
 
     Actions.actOnForStatement(Items, Loc, init, Cond, Post, Body);
+    return false;
+}
+
+bool Parser::parseDefaultStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    if (consume(tok::kw_default))
+        return true;
+
+    if (consume(tok::colon))
+        return true;
+
+    Actions.actOnDefaultStatement(Items, Loc);
+    return false;
+}
+
+bool Parser::parseCaseStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    if (consume(tok::kw_case))
+        return true;
+
+    Expr * CaseExpr = nullptr;
+    if (parseExpr(CaseExpr, 0))
+        return true;
+
+    if (consume(tok::colon))
+        return true;
+
+    Actions.actOnCaseStatement(Items, Loc, CaseExpr);
+    return false;
+}
+
+bool Parser::parseSwitchStatement(BlockItems& Items) {
+    SMLoc Loc = Tok.getLocation();
+
+    Expr * Cond = nullptr;
+    Statement* Body = nullptr;
+
+    BlockItems body_sts;
+
+    if (consume(tok::kw_switch))
+        return true;
+
+    // Parse the conditional expression "(" <Exp> ")"
+    if (consume(tok::l_paren))
+        return true;
+    if (parseExpr(Cond, 0))
+        return true;
+    if (consume(tok::r_paren))
+        return true;
+
+    // Parse the body (this will typically be a compound statement with case labels)
+    if (parseStatement(body_sts))
+        return true;
+    if (!body_sts.empty())
+        Body = std::get<Statement*>(body_sts.back());
+
+    Actions.actOnSwitchStatement(Items, Loc, Cond, Body);
     return false;
 }
 

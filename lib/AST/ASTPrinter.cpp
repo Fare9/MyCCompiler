@@ -67,6 +67,12 @@ std::string ASTPrinter::print(const Statement* statement, int indent) {
             return printDoWhileStatement(dynamic_cast<const DoWhileStatement*>(statement), indent);
         case Statement::SK_For:
             return printForStatement(dynamic_cast<const ForStatement*>(statement), indent);
+        case Statement::SK_Switch:
+            return printSwitchStatement(dynamic_cast<const SwitchStatement*>(statement), indent);
+        case Statement::SK_Case:
+            return printCaseStatement(dynamic_cast<const CaseStatement*>(statement), indent);
+        case Statement::SK_Default:
+            return printDefaultStatement(dynamic_cast<const DefaultStatement*>(statement), indent);
     }
     return getIndent(indent) + "Unknown Statement\n";
 }
@@ -461,6 +467,49 @@ std::string ASTPrinter::printConditionalExpr(const ConditionalExpr* expr, int in
     }
 
     return output;
+}
+
+std::string ASTPrinter::printSwitchStatement(const SwitchStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "SwitchStatement\n";
+
+    // Print condition
+    output += getIndent(indent + 1) + "Condition:\n";
+    if (stmt->get_condition()) {
+        output += print(stmt->get_condition(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    // Print body
+    output += getIndent(indent + 1) + "Body:\n";
+    if (stmt->get_body()) {
+        output += print(stmt->get_body(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printCaseStatement(const CaseStatement* stmt, int indent)
+{
+    std::string output = getIndent(indent) + "CaseStatement\n";
+
+    // Print case value
+    output += getIndent(indent + 1) + "Value:\n";
+    if (stmt->getValue()) {
+        output += print(stmt->getValue(), indent + 2);
+    } else {
+        output += getIndent(indent + 2) + "null\n";
+    }
+
+    return output;
+}
+
+std::string ASTPrinter::printDefaultStatement(const DefaultStatement* stmt, int indent)
+{
+    return getIndent(indent) + "DefaultStatement\n";
 }
 
 std::string ASTPrinter::getIndent(int level) {
