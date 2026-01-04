@@ -95,20 +95,22 @@ bool Parser::parseFunction(Function *&F) {
 
     F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args);
 
-    Actions.enterFunction();
+    if (Tok.is(tok::semi)) {
+        advance();
+    } else {
+        // consume body
+        BlockItems body;
+        if (consume(tok::l_brace))
+            return _errorhandler();
 
-    // consume body
-    BlockItems body;
-    if (consume(tok::l_brace))
-        return _errorhandler();
-    Actions.enterScope();
-    // Parse statement sequence - fail immediately on error
-    if (parseBlock(body))
-        return _errorhandler();
-    Actions.exitScope();
-    if (consume(tok::r_brace))
-        return _errorhandler();
-    F->setBody(body);
+        // Parse statement sequence - fail immediately on error
+        if (parseBlock(body))
+            return _errorhandler();
+        Actions.exitScope();
+        if (consume(tok::r_brace))
+            return _errorhandler();
+        F->setBody(body);
+    }
 
     Actions.exitFunction();
 
@@ -123,8 +125,36 @@ bool Parser::parseFunction(Function *&F) {
 bool Parser::parseBlock(BlockItems &Items) {
     while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
         if (Tok.is(tok::kw_int)) {
-            if (parseVarDeclaration(Items))
-                return true;
+            // Peek ahead to determine if it's a function or variable declaration
+            // int <identifier> ( -> function declaration
+            // int <identifier> = or ; -> variable declaration
+
+            Token nextTok;
+            Lex.peek(nextTok);
+
+            if (nextTok.is(tok::identifier)) {
+                // Need to peek one more token ahead to see if it's '('
+                // Since we can't easily peek 2 tokens, we'll consume and check
+                advance(); // consume 'int'
+                StringRef name = Tok.getIdentifier();
+                SMLoc loc = Tok.getLocation();
+                advance(); // consume identifier
+
+                if (Tok.is(tok::l_paren)) {
+                    // Function declaration
+                    if (parseFunctionDeclarationStmt(Items, loc, name))
+                        return true;
+                } else {
+                    // Variable declaration - need to backtrack or handle inline
+                    // Since we can't backtrack easily, handle it here
+                    if (parseVariableDeclInline(Items, loc, name))
+                        return true;
+                }
+            } else {
+                // Error case - let parseDeclaration handle it
+                if (parseVarDeclaration(Items))
+                    return true;
+            }
         } else {
             if (parseStatement(Items))
                 return true;
@@ -132,6 +162,7 @@ bool Parser::parseBlock(BlockItems &Items) {
     }
     return false;
 }
+
 
 bool Parser::parseVarDeclaration(BlockItems &Items) {
     if (Tok.is(tok::kw_int)) {
@@ -160,9 +191,6 @@ bool Parser::parseVarDeclaration(BlockItems &Items) {
             if (parseExpr(exp))
                 return true;
         }
-        if (consume(tok::semi))
-            return true;
-
         decl->setExpr(exp);
         return false;
     }
@@ -437,7 +465,6 @@ bool Parser::parseForStmt(BlockItems &Items) {
     Expr *Cond = nullptr;
     Expr *Post = nullptr;
     Statement *Body = nullptr;
-    bool hasDeclaration = false;
 
     if (consume(tok::kw_for) && consume(tok::kw_tree))
         return true;
@@ -445,39 +472,16 @@ bool Parser::parseForStmt(BlockItems &Items) {
     if (consume(tok::l_paren))
         return true;
 
+    // We always enter the scope here, so if any declaration...
+    Actions.enterScope();
     // Parse init (Declaration | Expr | nothing)
     if (Tok.is(tok::kw_int)) {
-        // Handle declaration like "int i = 0"
-        // This code is a copy of parseVarDeclaration
-        SMLoc DeclLoc = Tok.getLocation();
-        advance(); // consume 'int'
-
-        Actions.enterScope();
-        hasDeclaration = true;
-
-        if (expect(tok::identifier))
-            return true;
-
-        StringRef varName = Tok.getIdentifier();
-        advance();
-
-        // Create a temporary BlockItems just for the declaration
+        // Use parseVarDeclaration instead of duplicating code
         BlockItems tempItems;
-        if (Actions.actOnVarDeclaration(tempItems, DeclLoc, varName))
+        if (parseVarDeclaration(tempItems))
             return true;
-
-        VarDeclaration *decl = std::get<VarDeclaration *>(tempItems.back());
-
-        // Check for optional initializer
-        Expr *exp = nullptr;
-        if (Tok.is(tok::equal)) {
-            advance();
-            if (parseExpr(exp))
-                return true;
-        }
-
-        decl->setExpr(exp);
-        init = decl;
+        // We extract the decalaration from tempItems
+        init = std::get<VarDeclaration *>(tempItems.back());
     } else if (!Tok.is(tok::semi)) {
         // Handle expression: i = 0
         Expr *initExpr = nullptr;
@@ -514,8 +518,8 @@ bool Parser::parseForStmt(BlockItems &Items) {
     if (!body_sts.empty())
         Body = std::get<Statement *>(body_sts.back());
 
-    if (hasDeclaration)
-        Actions.exitScope();
+    // Always exit scope since we entered at l_paren
+    Actions.exitScope();
 
     Actions.actOnForStatement(Items, Loc, init, Cond, Post, Body);
     return false;
@@ -579,6 +583,89 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
     Actions.actOnSwitchStatement(Items, Loc, Cond, Body);
     return false;
 }
+
+bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name) {
+    ArgsList args;
+
+    if (consume(tok::l_paren))
+        return true;
+
+    if (Tok.is(tok::kw_void)) {
+        advance();
+    } else if (!Tok.is(tok::r_paren)) {
+        // int foo(int x, int y, ...) - has parameters
+        if (consume(tok::kw_int))
+            return true;
+        if (expect(tok::identifier))
+            return true;
+
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        if (param)
+            args.push_back(param);
+        advance();
+
+        while (Tok.is(tok::comma)) {
+            advance(); // consume comma
+            if (consume(tok::kw_int))
+                return true;
+            if (expect(tok::identifier))
+                return true;
+
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            if (param)
+                args.push_back(param);
+            advance();
+        }
+    }
+
+    if (consume(tok::r_paren))
+        return true;
+
+    // Create a Function object with no body (declaration only)
+    Function *F = Actions.actOnFunctionDeclaration(Loc, Name, args);
+
+    if (Tok.is(tok::semi)) {
+        advance();
+    } else {
+        // consume body
+        BlockItems body;
+        if (consume(tok::l_brace))
+            return true;
+        // Parse statement sequence - fail immediately on error
+        if (parseBlock(body))
+            return true;
+        if (consume(tok::r_brace))
+            return true;
+        F->setBody(body);
+    }
+
+    Items.emplace_back(F);
+    return false;
+}
+
+bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name) {
+    // We've already consumed 'int' and identifier
+    // Now at '=' or ';'
+
+    if (Actions.actOnVarDeclaration(Items, Loc, Name))
+        return true;
+
+    VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
+    Expr *exp = nullptr;
+
+    if (Tok.is(tok::equal)) {
+        advance();
+        if (parseExpr(exp))
+            return true;
+    }
+
+    if (consume(tok::semi))
+        return true;
+
+    decl->setExpr(exp);
+    return false;
+}
+
 
 namespace {
     std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedence = {
@@ -826,12 +913,11 @@ bool Parser::parseFactor(Expr *&E) {
                         return _errorhandler();
                     args.push_back(arg);
                 }
-
-                if (consume(tok::r_paren))
-                    return _errorhandler();
-
-                E = Actions.actOnFunctionCallOperator(Loc, name, args);
             }
+            if (consume(tok::r_paren))
+                return _errorhandler();
+
+            E = Actions.actOnFunctionCallOperator(Loc, name, args);
         } else {
             E = Actions.actOnIdentifier(Loc, name);
             if (!E)
@@ -849,8 +935,13 @@ bool Parser::parseFactor(Expr *&E) {
             }
         }
     }
+
     // Look for unary operators or for prefix operators
-    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)) {
+    else if
+    (Tok
+        .
+        isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)
+    ) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
@@ -871,7 +962,11 @@ bool Parser::parseFactor(Expr *&E) {
             E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreDecrement, internalExpr);
     }
     // Parentheses expression (<expr>)
-    else if (Tok.is(tok::l_paren)) {
+    else if
+    (Tok
+        .
+        is(tok::l_paren)
+    ) {
         advance();
         if (parseExpr(E, 0))
             return _errorhandler();
@@ -889,8 +984,11 @@ bool Parser::parseFactor(Expr *&E) {
                 E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
         }
     } else
-        return _errorhandler();
-    return false;
+        return
+                _errorhandler();
+
+    return
+            false;
 }
 
 int Parser::get_operator_kind_by_expr(Expr *expr) {

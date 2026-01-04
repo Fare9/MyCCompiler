@@ -601,7 +601,7 @@ std::string Sema::generateUniqueVarName(StringRef originalName) {
 
 void Sema::pushVariableName(StringRef originalName, const std::string &uniqueName) {
     // We keep unique names instead of the original ones
-    // it will be easier for later generating the intermmediate
+    // it will be easier for later generating the intermediate
     // representation
     VariableNameStacks[originalName].push_back(uniqueName);
 }

@@ -23,7 +23,7 @@ namespace mycc {
 
     using ExprList = std::vector<Expr *>;
     using StmtList = std::vector<Statement *>;
-    using BlockItem = std::variant<Statement *, VarDeclaration *, std::monostate>;
+    using BlockItem = std::variant<Statement *, VarDeclaration *, Function*, std::monostate>;
     using ForInit = std::variant<VarDeclaration *, Expr *, std::monostate>;
     using BlockItems = std::vector<BlockItem>;
     using FuncList = std::vector<Function *>;

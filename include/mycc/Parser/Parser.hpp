@@ -112,7 +112,8 @@ class Parser {
     bool parseCaseStatement(BlockItems& Items);
     bool parseSwitchStatement(BlockItems& Items);
 
-    bool parseVar(Var** var);
+    bool parseFunctionDeclarationStmt(BlockItems& Items, SMLoc Loc, StringRef Name);
+    bool parseVariableDeclInline(BlockItems& Items, SMLoc Loc, StringRef Name);
 
     bool parseExpr(Expr *&E, int min_precedence = 0);
     bool parseMiddle(Expr *&Middle);

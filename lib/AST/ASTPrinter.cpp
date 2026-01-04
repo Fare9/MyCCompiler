@@ -26,12 +26,37 @@ std::string ASTPrinter::print(const Function* function, int indent) {
     if (!function) return getIndent(indent) + "null\n";
 
     std::string output = getIndent(indent) + "Function: " + function->getName().str() + "\n";
-    for (auto item : *function) {
-        if (std::holds_alternative<Statement*>(item))
-            output += print(std::get<Statement*>(item), indent + 1);
-        else if (std::holds_alternative<VarDeclaration*>(item))
-            output += print(std::get<VarDeclaration*>(item), indent + 1);
+
+    // Print parameters
+    const auto& args = function->getArgs();
+    if (!args.empty()) {
+        output += getIndent(indent + 1) + "Parameters:\n";
+        for (const auto* arg : args) {
+            output += printVar(arg, indent + 2);
+        }
+    } else {
+        output += getIndent(indent + 1) + "Parameters: (none)\n";
     }
+
+    // Print body (if present)
+    bool hasBody = false;
+    for (auto item : *function) {
+        if (!hasBody) {
+            output += getIndent(indent + 1) + "Body:\n";
+            hasBody = true;
+        }
+        if (std::holds_alternative<Statement*>(item))
+            output += print(std::get<Statement*>(item), indent + 2);
+        else if (std::holds_alternative<VarDeclaration*>(item))
+            output += print(std::get<VarDeclaration*>(item), indent + 2);
+        else if (std::holds_alternative<Function*>(item))
+            output += print(std::get<Function*>(item), indent + 2);
+    }
+
+    if (!hasBody) {
+        output += getIndent(indent + 1) + "Body: (declaration only)\n";
+    }
+
     return output;
 }
 
