@@ -29,8 +29,8 @@ std::string ASTPrinter::print(const Function* function, int indent) {
     for (auto item : *function) {
         if (std::holds_alternative<Statement*>(item))
             output += print(std::get<Statement*>(item), indent + 1);
-        else if (std::holds_alternative<Declaration*>(item))
-            output += print(std::get<Declaration*>(item), indent + 1);
+        else if (std::holds_alternative<VarDeclaration*>(item))
+            output += print(std::get<VarDeclaration*>(item), indent + 1);
     }
     return output;
 }
@@ -83,7 +83,7 @@ std::string ASTPrinter::print(const Expr* expr) {
 
 std::string ASTPrinter::print(const Expr* expr, int indent) {
     if (!expr) return getIndent(indent) + "null\n";
-    
+
     switch (expr->getKind()) {
         case Expr::Ek_Int:
             return printIntegerLiteral(dynamic_cast<const IntegerLiteral*>(expr), indent);
@@ -101,6 +101,8 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
             return printPostfixOperator(dynamic_cast<const PostfixOperator*>(expr), indent);
         case Expr::Ek_ConditionalOperator:
             return printConditionalExpr(dynamic_cast<const ConditionalExpr*>(expr), indent);
+        case Expr::Ek_FunctionCallOperator:
+            return printFunctionCallExpr(dynamic_cast<const FunctionCallExpr*>(expr), indent);
     }
     return getIndent(indent) + "Unknown Expression\n";
 }
@@ -211,11 +213,11 @@ std::string ASTPrinter::printBinaryOperator(const BinaryOperator* expr, int inde
     return output;
 }
 
-std::string ASTPrinter::print(const Declaration* decl) {
+std::string ASTPrinter::print(const VarDeclaration* decl) {
     return print(decl, 0);
 }
 
-std::string ASTPrinter::print(const Declaration* decl, int indent) {
+std::string ASTPrinter::print(const VarDeclaration* decl, int indent) {
     if (!decl) return getIndent(indent) + "null\n";
     return printDeclaration(decl, indent);
 }
@@ -277,7 +279,7 @@ std::string ASTPrinter::printPostfixOperator(const PostfixOperator* expr, int in
     return output;
 }
 
-std::string ASTPrinter::printDeclaration(const Declaration* decl, int indent) {
+std::string ASTPrinter::printDeclaration(const VarDeclaration* decl, int indent) {
     std::string output = getIndent(indent) + "Declaration\n";
     output += getIndent(indent + 1) + "Name:\n";
     output += printVar(decl->getVar(), indent + 2);
@@ -323,8 +325,8 @@ std::string ASTPrinter::printCompoundStatement(const CompoundStatement* stmt, in
     for (const auto& item : *stmt) {
         if (std::holds_alternative<Statement*>(item)) {
             output += print(std::get<Statement*>(item), indent + 1);
-        } else if (std::holds_alternative<Declaration*>(item)) {
-            output += print(std::get<Declaration*>(item), indent + 1);
+        } else if (std::holds_alternative<VarDeclaration*>(item)) {
+            output += print(std::get<VarDeclaration*>(item), indent + 1);
         }
     }
 
@@ -404,8 +406,8 @@ std::string ASTPrinter::printForStatement(const ForStatement* stmt, int indent)
     // Print init
     output += getIndent(indent + 1) + "Init:\n";
     const ForInit& init = stmt->getInit();
-    if (std::holds_alternative<Declaration*>(init)) {
-        output += print(std::get<Declaration*>(init), indent + 2);
+    if (std::holds_alternative<VarDeclaration*>(init)) {
+        output += print(std::get<VarDeclaration*>(init), indent + 2);
     } else if (std::holds_alternative<Expr*>(init)) {
         output += print(std::get<Expr*>(init), indent + 2);
     } else {
@@ -510,6 +512,23 @@ std::string ASTPrinter::printCaseStatement(const CaseStatement* stmt, int indent
 std::string ASTPrinter::printDefaultStatement(const DefaultStatement* stmt, int indent)
 {
     return getIndent(indent) + "DefaultStatement\n";
+}
+
+std::string ASTPrinter::printFunctionCallExpr(const FunctionCallExpr* expr, int indent) {
+    std::string output = getIndent(indent) + "FunctionCallExpr: " + expr->getIdentifier().str() + "\n";
+
+    // Print arguments
+    const auto& args = expr->getArgs();
+    if (!args.empty()) {
+        output += getIndent(indent + 1) + "Arguments:\n";
+        for (const auto* arg : args) {
+            output += print(arg, indent + 2);
+        }
+    } else {
+        output += getIndent(indent + 1) + "Arguments: (none)\n";
+    }
+
+    return output;
 }
 
 std::string ASTPrinter::getIndent(int level) {

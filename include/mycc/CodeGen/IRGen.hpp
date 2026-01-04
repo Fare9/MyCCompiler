@@ -35,7 +35,7 @@ private:
     bool generateBlockItem(const BlockItem& Item, ir::Function* IRFunc);
     // Convert AST Statement to IR Instructions
     void generateStatement(const Statement& Stmt, ir::Function* IRFunc);
-    void generateDeclaration(const Declaration& Decl, ir::Function* IRFunc);
+    void generateDeclaration(const VarDeclaration& Decl, ir::Function* IRFunc);
 
     // Convert Statements to IR values
     void generateReturnStmt(const Statement& Stmt, ir::Function* IRFunc);

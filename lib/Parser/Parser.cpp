@@ -1,8 +1,5 @@
-
 #include "mycc/Parser/Parser.hpp"
 
-#include "mycc/AST/AST.hpp"
-#include "mycc/AST/AST.hpp"
 #include "mycc/AST/AST.hpp"
 
 using namespace mycc;
@@ -10,8 +7,8 @@ using namespace mycc;
 Parser::Parser(Lexer &Lex, Sema &Actions, ASTContext &Context) : Lex(Lex), Actions(Actions), Context(Context) {
 }
 
-Program* Parser::parse() {
-    Program * p = nullptr;
+Program *Parser::parse() {
+    Program *p = nullptr;
     parseProgram(p);
     return p;
 }
@@ -23,7 +20,7 @@ bool Parser::parseProgram(Program *&P) {
     advance();
     // now start consuming functions
     while (Tok.isNot(tok::eof)) {
-        Function * Func = nullptr;
+        Function *Func = nullptr;
         if (!parseFunction(Func)) {
             return false;
         }
@@ -46,20 +43,59 @@ bool Parser::parseFunction(Function *&F) {
     if (expect(tok::identifier))
         return _errorhandler();
 
-    F = Actions.actOnFunctionDeclaration(Tok.getLocation(), Tok.getIdentifier());
-
+    // Enter function-level state (labels, etc.)
     Actions.enterFunction();
+
+    // Enter function scope (for parameters AND body)
+    Actions.enterScope();
+
+    StringRef funcName = Tok.getIdentifier();
+    SMLoc funcLoc = Tok.getLocation();
 
     // advance to next token
     advance();
 
+    ArgsList args;
+
     // for now consume "(void)"
     if (consume(tok::l_paren))
         return _errorhandler();
-    if (consume(tok::kw_void))
-        return _errorhandler();
+    // Check for void (no parameters) vs parameter list
+    if (Tok.is(tok::kw_void)) {
+        // int foo(void) - no parameters
+        advance();
+    } else if (!Tok.is(tok::r_paren)) {
+        // int foo(int x, int y, ...) - has parameters
+        if (consume(tok::kw_int))
+            return _errorhandler();
+        if (expect(tok::identifier))
+            return _errorhandler();
+
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        if (param)
+            args.push_back(param);
+        advance();
+
+        while (Tok.is(tok::comma)) {
+            advance(); // consume comma
+            if (consume(tok::kw_int))
+                return _errorhandler();
+            if (expect(tok::identifier))
+                return _errorhandler();
+
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            if (param)
+                args.push_back(param);
+            advance();
+        }
+    }
+
     if (consume(tok::r_paren))
         return _errorhandler();
+
+    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args);
+
+    Actions.enterFunction();
 
     // consume body
     BlockItems body;
@@ -84,13 +120,12 @@ bool Parser::parseFunction(Function *&F) {
     return true;
 }
 
-bool Parser::parseBlock(BlockItems& Items) {
+bool Parser::parseBlock(BlockItems &Items) {
     while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
         if (Tok.is(tok::kw_int)) {
-            if (parseDeclaration(Items))
+            if (parseVarDeclaration(Items))
                 return true;
-        }
-        else {
+        } else {
             if (parseStatement(Items))
                 return true;
         }
@@ -98,7 +133,7 @@ bool Parser::parseBlock(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseDeclaration(BlockItems& Items) {
+bool Parser::parseVarDeclaration(BlockItems &Items) {
     if (Tok.is(tok::kw_int)) {
         SMLoc Loc = Tok.getLocation();
         // type is correct, advance it
@@ -116,8 +151,8 @@ bool Parser::parseDeclaration(BlockItems& Items) {
         // if the variable is used in the declaration
         // this is compliant with the standard, but it
         // is an undefined behavior.
-        Declaration * decl = std::get<Declaration*>(Items.back());
-        Expr * exp = nullptr;
+        VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
+        Expr *exp = nullptr;
         // the assignment to the declaration is
         // optional
         if (Tok.is(tok::equal)) {
@@ -135,8 +170,7 @@ bool Parser::parseDeclaration(BlockItems& Items) {
     return true;
 }
 
-bool Parser::parseStatement(BlockItems& Items) {
-
+bool Parser::parseStatement(BlockItems &Items) {
     if (Tok.is(tok::kw_return)) {
         return parseReturnStmt(Items);
     }
@@ -148,28 +182,22 @@ bool Parser::parseStatement(BlockItems& Items) {
     if (Tok.is(tok::kw_if)) {
         return parseIfStmt(Items);
     }
-    if (Tok.is(tok::l_brace))
-    {
+    if (Tok.is(tok::l_brace)) {
         return parseCompoundStmt(Items);
     }
-    if (Tok.is(tok::kw_goto))
-    {
+    if (Tok.is(tok::kw_goto)) {
         return parseGotoStmt(Items);
     }
-    if (Tok.is(tok::kw_while))
-    {
+    if (Tok.is(tok::kw_while)) {
         return parseWhileStmt(Items);
     }
-    if (Tok.is(tok::kw_do))
-    {
+    if (Tok.is(tok::kw_do)) {
         return parseDoWhileStmt(Items);
     }
-    if (Tok.is(tok::kw_for) || Tok.is(tok::kw_tree))
-    {
+    if (Tok.is(tok::kw_for) || Tok.is(tok::kw_tree)) {
         return parseForStmt(Items);
     }
-    if (Tok.is(tok::kw_break))
-    {
+    if (Tok.is(tok::kw_break)) {
         SMLoc Loc = Tok.getLocation();
         if (consume(tok::kw_break))
             return true;
@@ -178,8 +206,7 @@ bool Parser::parseStatement(BlockItems& Items) {
         Actions.actOnBreakStatement(Items, Loc);
         return false;
     }
-    if (Tok.is(tok::kw_continue))
-    {
+    if (Tok.is(tok::kw_continue)) {
         SMLoc Loc = Tok.getLocation();
         if (consume(tok::kw_continue))
             return true;
@@ -197,28 +224,24 @@ bool Parser::parseStatement(BlockItems& Items) {
     if (Tok.is(tok::kw_switch)) {
         return parseSwitchStatement(Items);
     }
-    if (Tok.is(tok::identifier))
-    {
+    if (Tok.is(tok::identifier)) {
         // Peek ahead to see if the next token is a colon
         Token nextTok;
         Lex.peek(nextTok);
 
         // check if we have `:`, in that case, there's a label
-        if (nextTok.is(tok::colon))
-        {
+        if (nextTok.is(tok::colon)) {
             StringRef labelName = Tok.getIdentifier();
             SMLoc loc = Tok.getLocation();
             advance(); // consume identifier
             advance(); // consume colon
             Actions.actOnLabelStatement(Items, loc, labelName);
 
-            if (Tok.is(tok::kw_int))
-            {
+            if (Tok.is(tok::kw_int)) {
                 getDiagnostics().report(Tok.getLocation(), diag::err_expected_statement_after_label);
                 return true;
             }
-            if (Tok.is(tok::r_brace))
-            {
+            if (Tok.is(tok::r_brace)) {
                 getDiagnostics().report(Tok.getLocation(), diag::err_label_cannot_end_block);
                 return true;
             }
@@ -234,9 +257,8 @@ bool Parser::parseStatement(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseReturnStmt(BlockItems& Items) {
-
-    Expr * E = nullptr;
+bool Parser::parseReturnStmt(BlockItems &Items) {
+    Expr *E = nullptr;
     SMLoc Loc = Tok.getLocation();
     if (consume(tok::kw_return))
         return true;
@@ -251,8 +273,8 @@ bool Parser::parseReturnStmt(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseExprStmt(BlockItems& Items) {
-    Expr * E = nullptr;
+bool Parser::parseExprStmt(BlockItems &Items) {
+    Expr *E = nullptr;
     SMLoc Loc = Tok.getLocation();
 
     // Try to parse expression - let parseExpr handle invalid tokens
@@ -265,10 +287,10 @@ bool Parser::parseExprStmt(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseIfStmt(BlockItems& Items) {
+bool Parser::parseIfStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
-    Expr * Cond = nullptr;
+    Expr *Cond = nullptr;
     BlockItems then_sts;
     BlockItems else_sts;
 
@@ -287,22 +309,20 @@ bool Parser::parseIfStmt(BlockItems& Items) {
         return true;
 
     // if there's an else statement
-    if (Tok.is(tok::kw_else))
-    {
+    if (Tok.is(tok::kw_else)) {
         advance();
         if (parseStatement(else_sts))
             return true;
     }
 
-    Statement * then_st = then_sts.empty() ? nullptr : std::get<Statement*>(then_sts.back());
-    Statement * else_st = else_sts.empty() ? nullptr : std::get<Statement*>(else_sts.back());
+    Statement *then_st = then_sts.empty() ? nullptr : std::get<Statement *>(then_sts.back());
+    Statement *else_st = else_sts.empty() ? nullptr : std::get<Statement *>(else_sts.back());
 
     Actions.actOnIfStatement(Items, Loc, Cond, then_st, else_st);
     return false;
 }
 
-bool Parser::parseCompoundStmt(BlockItems& Items)
-{
+bool Parser::parseCompoundStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
     if (consume(tok::l_brace))
@@ -328,8 +348,7 @@ bool Parser::parseCompoundStmt(BlockItems& Items)
     return result;
 }
 
-bool Parser::parseGotoStmt(BlockItems& Items)
-{
+bool Parser::parseGotoStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
     advance();
 
@@ -348,12 +367,11 @@ bool Parser::parseGotoStmt(BlockItems& Items)
     return false;
 }
 
-bool Parser::parseWhileStmt(BlockItems& Items)
-{
+bool Parser::parseWhileStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
-    Expr * Cond = nullptr;
-    Statement * Body = nullptr;
+    Expr *Cond = nullptr;
+    Statement *Body = nullptr;
 
     BlockItems body_sts;
 
@@ -372,18 +390,17 @@ bool Parser::parseWhileStmt(BlockItems& Items)
         return true;
 
     if (!body_sts.empty())
-        Body = std::get<Statement*>(body_sts.back());
+        Body = std::get<Statement *>(body_sts.back());
 
     Actions.actOnWhileStatement(Items, Loc, Cond, Body);
     return false;
 }
 
-bool Parser::parseDoWhileStmt(BlockItems& Items)
-{
+bool Parser::parseDoWhileStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
-    Statement * Body = nullptr;
-    Expr * Cond = nullptr;
+    Statement *Body = nullptr;
+    Expr *Cond = nullptr;
 
     BlockItems body_sts;
 
@@ -408,19 +425,18 @@ bool Parser::parseDoWhileStmt(BlockItems& Items)
         return true;
 
     if (!body_sts.empty())
-        Body = std::get<Statement*>(body_sts.back());
+        Body = std::get<Statement *>(body_sts.back());
 
     Actions.actOnDoWhileStatement(Items, Loc, Body, Cond);
     return false;
 }
 
-bool Parser::parseForStmt(BlockItems& Items)
-{
+bool Parser::parseForStmt(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
     ForInit init = std::monostate{};
-    Expr * Cond = nullptr;
-    Expr * Post = nullptr;
-    Statement * Body = nullptr;
+    Expr *Cond = nullptr;
+    Expr *Post = nullptr;
+    Statement *Body = nullptr;
     bool hasDeclaration = false;
 
     if (consume(tok::kw_for) && consume(tok::kw_tree))
@@ -432,7 +448,7 @@ bool Parser::parseForStmt(BlockItems& Items)
     // Parse init (Declaration | Expr | nothing)
     if (Tok.is(tok::kw_int)) {
         // Handle declaration like "int i = 0"
-        // This code is a copy of parseDeclaration
+        // This code is a copy of parseVarDeclaration
         SMLoc DeclLoc = Tok.getLocation();
         advance(); // consume 'int'
 
@@ -450,10 +466,10 @@ bool Parser::parseForStmt(BlockItems& Items)
         if (Actions.actOnVarDeclaration(tempItems, DeclLoc, varName))
             return true;
 
-        Declaration* decl = std::get<Declaration*>(tempItems.back());
+        VarDeclaration *decl = std::get<VarDeclaration *>(tempItems.back());
 
         // Check for optional initializer
-        Expr* exp = nullptr;
+        Expr *exp = nullptr;
         if (Tok.is(tok::equal)) {
             advance();
             if (parseExpr(exp))
@@ -464,7 +480,7 @@ bool Parser::parseForStmt(BlockItems& Items)
         init = decl;
     } else if (!Tok.is(tok::semi)) {
         // Handle expression: i = 0
-        Expr* initExpr = nullptr;
+        Expr *initExpr = nullptr;
         if (parseExpr(initExpr, 0))
             return true;
         init = initExpr;
@@ -475,8 +491,7 @@ bool Parser::parseForStmt(BlockItems& Items)
 
     // Now we need to detect if we need to parse a
     // conditional expression
-    if (!Tok.is(tok::semi))
-    {
+    if (!Tok.is(tok::semi)) {
         if (parseExpr(Cond, 0))
             return true;
     }
@@ -485,8 +500,7 @@ bool Parser::parseForStmt(BlockItems& Items)
         return true;
 
     // Now check if we have a post loop
-    if (!Tok.is(tok::r_paren))
-    {
+    if (!Tok.is(tok::r_paren)) {
         if (parseExpr(Post, 0))
             return true;
     }
@@ -498,7 +512,7 @@ bool Parser::parseForStmt(BlockItems& Items)
     if (parseStatement(body_sts))
         return true;
     if (!body_sts.empty())
-        Body = std::get<Statement*>(body_sts.back());
+        Body = std::get<Statement *>(body_sts.back());
 
     if (hasDeclaration)
         Actions.exitScope();
@@ -507,7 +521,7 @@ bool Parser::parseForStmt(BlockItems& Items)
     return false;
 }
 
-bool Parser::parseDefaultStatement(BlockItems& Items) {
+bool Parser::parseDefaultStatement(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
     if (consume(tok::kw_default))
@@ -520,13 +534,13 @@ bool Parser::parseDefaultStatement(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseCaseStatement(BlockItems& Items) {
+bool Parser::parseCaseStatement(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
     if (consume(tok::kw_case))
         return true;
 
-    Expr * CaseExpr = nullptr;
+    Expr *CaseExpr = nullptr;
     if (parseExpr(CaseExpr, 0))
         return true;
 
@@ -537,11 +551,11 @@ bool Parser::parseCaseStatement(BlockItems& Items) {
     return false;
 }
 
-bool Parser::parseSwitchStatement(BlockItems& Items) {
+bool Parser::parseSwitchStatement(BlockItems &Items) {
     SMLoc Loc = Tok.getLocation();
 
-    Expr * Cond = nullptr;
-    Statement* Body = nullptr;
+    Expr *Cond = nullptr;
+    Statement *Body = nullptr;
 
     BlockItems body_sts;
 
@@ -560,47 +574,96 @@ bool Parser::parseSwitchStatement(BlockItems& Items) {
     if (parseStatement(body_sts))
         return true;
     if (!body_sts.empty())
-        Body = std::get<Statement*>(body_sts.back());
+        Body = std::get<Statement *>(body_sts.back());
 
     Actions.actOnSwitchStatement(Items, Loc, Cond, Body);
     return false;
 }
 
-namespace
-{
+namespace {
     std::unordered_map<BinaryOperator::BinaryOpKind, int> binary_operators_precedence = {
         {BinaryOperator::BinaryOpKind::BoK_Multiply, 50},
         {BinaryOperator::BinaryOpKind::BoK_Divide, 50},
         {BinaryOperator::BinaryOpKind::BoK_Remainder, 50},
         {BinaryOperator::BinaryOpKind::BoK_Add, 45},
         {BinaryOperator::BinaryOpKind::BoK_Subtract, 45},
-           // Bitwise shift operators (precedence 5 in C standard)
+        // Bitwise shift operators (precedence 5 in C standard)
         {BinaryOperator::BinaryOpKind::BoK_LeftShift, 40},
         {BinaryOperator::BinaryOpKind::BoK_RightShift, 40},
-           // minor than, minor equal, greater than, greater equal
-            {BinaryOperator::BinaryOpKind::BoK_LowerThan, 35},
+        // minor than, minor equal, greater than, greater equal
+        {BinaryOperator::BinaryOpKind::BoK_LowerThan, 35},
         {BinaryOperator::BinaryOpKind::BoK_LowerEqual, 35},
         {BinaryOperator::BinaryOpKind::BoK_GreaterThan, 35},
         {BinaryOperator::BinaryOpKind::BoK_GreaterEqual, 35},
         {BinaryOperator::BinaryOpKind::Bok_Equal, 30},
         {BinaryOperator::BinaryOpKind::Bok_NotEqual, 30},
-          // Relational operators would be ~35 (precedence 6-7)
-          // Equality operators would be ~30 (precedence 7)
-          // Bitwise AND (precedence 8 in C standard)
+        // Relational operators would be ~35 (precedence 6-7)
+        // Equality operators would be ~30 (precedence 7)
+        // Bitwise AND (precedence 8 in C standard)
         {BinaryOperator::BinaryOpKind::BoK_BitwiseAnd, 25},
-          // Bitwise XOR (precedence 9 in C standard)
+        // Bitwise XOR (precedence 9 in C standard)
         {BinaryOperator::BinaryOpKind::BoK_BitwiseXor, 20},
-          // Bitwise OR (precedence 10 in C standard)
+        // Bitwise OR (precedence 10 in C standard)
         {BinaryOperator::BinaryOpKind::BoK_BitwiseOr, 15},
-            // Logical AND and OR
+        // Logical AND and OR
         {BinaryOperator::BinaryOpKind::Bok_And, 10},
         {BinaryOperator::BinaryOpKind::Bok_Or, 5},
-            // ? expression for ternary operators
+        // ? expression for ternary operators
         {BinaryOperator::BinaryOpKind::Bok_Interrogation, 3},
-            // = for assignments
+        // = for assignments
         {BinaryOperator::BinaryOpKind::Bok_Assign, 1},
-        };
+    };
 }
+
+static constexpr tok::TokenKind exprOps[] = {
+    // Chapter 3
+    tok::plus,
+    tok::minus,
+    tok::lessless,
+    tok::greatergreater,
+    tok::star,
+    tok::slash,
+    tok::percent,
+    tok::amp,
+    tok::caret,
+    tok::pipe,
+    // Chapter 4
+    tok::less,
+    tok::greater,
+    tok::lessequal,
+    tok::greaterequal,
+    tok::equalequal,
+    tok::exclaimequal,
+    tok::ampamp,
+    tok::pipepipe,
+    // Chapter 5
+    tok::equal,
+    tok::compoundadd,
+    tok::compoundsub,
+    tok::compoundmul,
+    tok::compounddiv,
+    tok::compoundrem,
+    tok::compoundand,
+    tok::compoundor,
+    tok::compoundxor,
+    tok::compoundshl,
+    tok::compoundshr,
+    // Chapter 6
+    tok::interrogation
+};
+
+static constexpr tok::TokenKind compoundExprs[] = {
+    tok::compoundadd,
+    tok::compoundsub,
+    tok::compoundmul,
+    tok::compounddiv,
+    tok::compoundrem,
+    tok::compoundand,
+    tok::compoundor,
+    tok::compoundxor,
+    tok::compoundshl,
+    tok::compoundshr
+};
 
 bool Parser::parseExpr(Expr *&E, int min_precedence) {
     auto _errorhandler = [this] {
@@ -623,52 +686,9 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
     if (parseFactor(left))
         _errorhandler();
 
-    while (Tok.isOneOf(
-            // Chapter 3
-            tok::plus,
-            tok::minus,
-            tok::lessless,
-            tok::greatergreater,
-            tok::star,
-            tok::slash,
-            tok::percent,
-            tok::amp,
-            tok::caret,
-            tok::pipe,
-            // Chapter 4
-            tok::less,
-            tok::greater,
-            tok::lessequal,
-            tok::greaterequal,
-            tok::equalequal,
-            tok::exclaimequal,
-            tok::ampamp,
-            tok::pipepipe,
-            // Chapter 5
-            tok::equal,
-            tok::compoundadd,
-            tok::compoundsub,
-            tok::compoundmul,
-            tok::compounddiv,
-            tok::compoundrem,
-            tok::compoundand,
-            tok::compoundor,
-            tok::compoundxor,
-            tok::compoundshl,
-            tok::compoundshr,
-            // Chapter 6
-            tok::interrogation)) {
+    while (Tok.isOneOf(exprOps)) {
         // Compound statements
-        if (Tok.isOneOf(tok::compoundadd,
-            tok::compoundsub,
-            tok::compoundmul,
-            tok::compounddiv,
-            tok::compoundrem,
-            tok::compoundand,
-            tok::compoundor,
-            tok::compoundxor,
-            tok::compoundshl,
-            tok::compoundshr)) {
+        if (Tok.isOneOf(compoundExprs)) {
             tok::TokenKind compoundToken = Tok.getKind();
             BinaryOperator::BinaryOpKind Kind = BinaryOperator::BinaryOpKind::Bok_Assign;
             int precedence = binary_operators_precedence[Kind];
@@ -707,7 +727,6 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             left = Actions.actOnAssignment(Loc, left, tempResult);
             if (left == nullptr)
                 _errorhandler();
-
         }
         // Assignment operator
         else if (Tok.is(tok::equal)) {
@@ -735,7 +754,7 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
 
             advance(); // consume '?'
 
-            Expr * middle, * right;
+            Expr *middle, *right;
             // first we parse a middle expression
             parseMiddle(middle);
             // then we parse the right one after ":"
@@ -744,14 +763,13 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
             left = Actions.actOnTernaryOperator(Loc, left, middle, right);
         }
         // any other binary operator
-        else
-        {
+        else {
             BinaryOperator::BinaryOpKind Kind = parseBinOp(Tok);
             int precedence = binary_operators_precedence[Kind];
             if (precedence < min_precedence) break;
             SMLoc Loc = Tok.getLocation();
             advance();
-            parseExpr(right, precedence+1);
+            parseExpr(right, precedence + 1);
             left = Actions.actOnBinaryOperator(Loc, Kind, left, right);
         }
     }
@@ -785,20 +803,50 @@ bool Parser::parseFactor(Expr *&E) {
     }
     // the factor is an identifier (it can contain postfix operator)
     else if (Tok.is(tok::identifier)) {
-        E = Actions.actOnIdentifier(Tok.getLocation(), Tok.getIdentifier());
-        if (!E)
-            return true;
+        StringRef name = Tok.getIdentifier();
+        SMLoc Loc = Tok.getLocation();
         advance();
 
-        // Check for postfix operators
-        if (Tok.isOneOf(tok::increment, tok::decrement)) {
-            tok::TokenKind OpKind = Tok.getKind();
-            SMLoc OpLoc = Tok.getLocation();
-            advance();
-            if (OpKind == tok::increment)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
-            else if (OpKind == tok::decrement)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+        // First we check if there's a parentheses
+        // in that case, it's a function call
+        if (Tok.is(tok::l_paren)) {
+            advance(); // consume '('
+            ExprList args;
+
+            if (!Tok.is(tok::r_paren)) {
+                // check we are not in the end of parameters
+                Expr *arg = nullptr;
+                if (parseExpr(arg, 0))
+                    return _errorhandler();
+                args.push_back(arg);
+
+                while (Tok.is(tok::comma)) {
+                    advance();
+                    if (parseExpr(arg, 0))
+                        return _errorhandler();
+                    args.push_back(arg);
+                }
+
+                if (consume(tok::r_paren))
+                    return _errorhandler();
+
+                E = Actions.actOnFunctionCallOperator(Loc, name, args);
+            }
+        } else {
+            E = Actions.actOnIdentifier(Loc, name);
+            if (!E)
+                return true;
+
+            // Check for postfix operators
+            if (Tok.isOneOf(tok::increment, tok::decrement)) {
+                tok::TokenKind OpKind = Tok.getKind();
+                SMLoc OpLoc = Tok.getLocation();
+                advance();
+                if (OpKind == tok::increment)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
+                else if (OpKind == tok::decrement)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+            }
         }
     }
     // Look for unary operators or for prefix operators
@@ -806,7 +854,7 @@ bool Parser::parseFactor(Expr *&E) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
-        Expr * internalExpr = nullptr;
+        Expr *internalExpr = nullptr;
         if (parseFactor(internalExpr))
             return _errorhandler();
         if (internalExpr == nullptr)
@@ -840,26 +888,25 @@ bool Parser::parseFactor(Expr *&E) {
             else if (OpKind == tok::decrement)
                 E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
         }
-    }
-    else
+    } else
         return _errorhandler();
     return false;
 }
 
-int Parser::get_operator_kind_by_expr(Expr * expr) {
-    if (BinaryOperator * binOp = reinterpret_cast<BinaryOperator*>(expr)) {
+int Parser::get_operator_kind_by_expr(Expr *expr) {
+    if (BinaryOperator *binOp = reinterpret_cast<BinaryOperator *>(expr)) {
         return binary_operators_precedence[binOp->getOperatorKind()];
     }
-    if (AssignmentOperator * assignOp = reinterpret_cast<AssignmentOperator*>(expr)) {
+    if (AssignmentOperator *assignOp = reinterpret_cast<AssignmentOperator *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Assign];
     }
-    if (ConditionalExpr * condExpr = reinterpret_cast<ConditionalExpr*>(expr)) {
+    if (ConditionalExpr *condExpr = reinterpret_cast<ConditionalExpr *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Interrogation];
     }
     return 0;
 }
 
-BinaryOperator::BinaryOpKind Parser::parseBinOp(Token& Tok) {
+BinaryOperator::BinaryOpKind Parser::parseBinOp(Token &Tok) {
     switch (Tok.getKind()) {
         case tok::minus:
             return BinaryOperator::BinaryOpKind::BoK_Subtract;

@@ -40,8 +40,8 @@ bool IRGenerator::generateBlockItem(const BlockItem &Item, ir::Function *IRFunc)
         generateStatement(*Stmt, IRFunc);
         if (Stmt->getKind() == Statement::SK_Return)
             return true;
-    } else if (std::holds_alternative<Declaration *>(Item)) {
-        Declaration *Decl = std::get<Declaration *>(Item);
+    } else if (std::holds_alternative<VarDeclaration *>(Item)) {
+        VarDeclaration *Decl = std::get<VarDeclaration *>(Item);
         generateDeclaration(*Decl, IRFunc);
     }
     return false;
@@ -118,7 +118,7 @@ void IRGenerator::generateStatement(const Statement &Stmt, ir::Function *IRFunc)
     }
 }
 
-void IRGenerator::generateDeclaration(const Declaration &Decl, ir::Function *IRFunc) {
+void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *IRFunc) {
     if (Decl.getExpr() == nullptr) return;
     const auto *left = Decl.getVar();
     const auto *right = Decl.getExpr();
@@ -265,8 +265,8 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
     auto label_end = Ctx.getOrCreateLabel(for_end, true);
 
     // Now we generate a declaration or an expression
-    if (std::holds_alternative<Declaration *>(For.getInit())) {
-        auto *decl = std::get<Declaration *>(For.getInit());
+    if (std::holds_alternative<VarDeclaration *>(For.getInit())) {
+        auto *decl = std::get<VarDeclaration *>(For.getInit());
         generateDeclaration(*decl, IRFunc);
     } else if (std::holds_alternative<Expr *>(For.getInit())) {
         auto *expr = std::get<Expr *>(For.getInit());

@@ -129,7 +129,7 @@ void Sema::validateSwitchBody(Statement *body,
             // Go over each item to validate the body
             for (auto &item: *compound) {
                 // Check if current item is a Declaration following case/default
-                if (std::holds_alternative<Declaration *>(item)) {
+                if (std::holds_alternative<VarDeclaration *>(item)) {
                     if (prevStmt &&
                         (prevStmt->getKind() == Statement::SK_Case ||
                          prevStmt->getKind() == Statement::SK_Default)) {
@@ -382,10 +382,37 @@ Program *Sema::actOnProgramDeclaration(FuncList &Funcs) {
     return p;
 }
 
-Function *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
-    auto *func = Context.createFunction<Function>(Name, Loc);
+Function *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) {
+    auto *func = Context.createFunction<Function>(Name, Loc, args);
 
     return func;
+}
+
+Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
+    // Generate unique name and track it
+    StringRef originalName = Name;
+    std::string uniqueName = generateUniqueVarName(originalName);
+    pushVariableName(originalName, uniqueName);
+
+    // Create Var with unique name
+    auto *var = Context.createExpression<Var>(Loc, uniqueName);
+
+    // Add to current scope if it exists (parameters are in function scope)
+    if (CurrentScope) {
+        // For parameters, we create a minimal VarDeclaration just for scope tracking
+        auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
+
+        if (!CurrentScope->insert(originalName, decl)) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_duplicate_variable_declaration, originalName.str());
+                return nullptr;
+            }
+        }
+
+        CurrentScope->addDeclaredVariable(originalName);
+    }
+
+    return var;
 }
 
 bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
@@ -396,7 +423,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
 
     // Create declaration with unique name
     auto *var = Context.createExpression<Var>(Loc, uniqueName);
-    auto *decl = Context.createDeclaration<Declaration>(Loc, var);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
 
     // Add to current scope if it exists, using original name as key
     if (CurrentScope) {
@@ -543,7 +570,7 @@ Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
         // We make a lookup by name, this lookup will traverse
         // all the scopes from current through parents looking
         /// for the variable.
-        Declaration *decl = CurrentScope->lookup(Name);
+        VarDeclaration *decl = CurrentScope->lookup(Name);
         if (!decl) {
             if (!avoid_errors) {
                 // Issue error for potentially undefined variable
@@ -562,6 +589,10 @@ Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
 
 ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) {
     return Context.createExpression<ConditionalExpr>(left, middle, right);
+}
+
+FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc, StringRef name, ExprList &args) {
+    return Context.createExpression<FunctionCallExpr>(name, args);
 }
 
 std::string Sema::generateUniqueVarName(StringRef originalName) {

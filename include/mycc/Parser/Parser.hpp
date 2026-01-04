@@ -97,7 +97,7 @@ class Parser {
     bool parseFunction(Function *&F);
 
     bool parseBlock(BlockItems& Items);
-    bool parseDeclaration(BlockItems& Items);
+    bool parseVarDeclaration(BlockItems& Items);
     bool parseStatement(BlockItems& Items);
     bool parseReturnStmt(BlockItems& Items);
     bool parseExprStmt(BlockItems& Items);
@@ -111,6 +111,8 @@ class Parser {
     bool parseDefaultStatement(BlockItems& Items);
     bool parseCaseStatement(BlockItems& Items);
     bool parseSwitchStatement(BlockItems& Items);
+
+    bool parseVar(Var** var);
 
     bool parseExpr(Expr *&E, int min_precedence = 0);
     bool parseMiddle(Expr *&Middle);

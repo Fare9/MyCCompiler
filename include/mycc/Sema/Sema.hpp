@@ -96,7 +96,9 @@ public:
     void assignLoopLabels(Function& F);
 
     Program * actOnProgramDeclaration(FuncList &Funcs);
-    Function * actOnFunctionDeclaration(SMLoc Loc, StringRef Name);
+    Function * actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList & args);
+
+    Var* actOnParameterDeclaration(SMLoc Loc, StringRef Name);
 
     bool actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name);
 
@@ -126,6 +128,7 @@ public:
     PostfixOperator* actOnPostfixOperator(SMLoc, PostfixOperator::PostfixOpKind Kind, Expr* expr);
     Var* actOnIdentifier(SMLoc, StringRef Name);
     ConditionalExpr * actOnTernaryOperator(SMLoc, Expr* left, Expr* middle, Expr* right);
+    FunctionCallExpr * actOnFunctionCallOperator(SMLoc, StringRef name, ExprList& args);
 };
 
 class EnterDeclScope {

@@ -27,6 +27,7 @@ bool parser = false;
 bool semantic = false;
 bool tacky = false;
 bool codegen = false;
+bool object = false;
 bool compile = false;
 bool print_output = false;
 
@@ -44,6 +45,7 @@ void print_help() {
               << "  --validate Run semantic analysis on top of parser\n"
               << "  --tacky    Run lexer, parser and generate IR\n"
               << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
+              << "  -c         Instruct the compiler driver to generate an object file\n"
               << "  --help     Show this help message\n"
               << "If no option is provided, all the steps will run and the output assembly is generated.\n";
 }
@@ -68,6 +70,7 @@ int main(int argc, char **argv) {
             {"--codegen", [&]() {
                 codegen = true;
             }},
+            {"-c", [&]() { object = true; }},
             {"--print",   [&]() { print_output = true; }},
             // other options
             {"--help",    [&]() { print_help(); }},
@@ -215,12 +218,16 @@ int main(int argc, char **argv) {
             if (executable_name.ends_with(".s"))
                 executable_name.erase(executable_name.length() - 2, 2);
 
+            if (object)
+                executable_name += ".o";
+
             std::vector<std::string> compilers = {"clang", "gcc"};
             bool compiled = false;
 
             for (const auto& compiler : compilers) {
                 if (tool_exists(compiler)) {
                     std::string compile_cmd = compiler;
+                    compile_cmd += object ? " -c" : "";
                     compile_cmd += " -o \"";
                     compile_cmd += executable_name;
                     compile_cmd += "\" \"";

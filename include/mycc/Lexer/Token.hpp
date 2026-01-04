@@ -1,5 +1,7 @@
 #pragma once
 
+#include <span>
+
 #include "mycc/Basic/TokenKinds.hpp"
 #include "mycc/Basic/LLVM.hpp"
 #include "llvm/ADT/StringRef.h"
@@ -78,6 +80,12 @@ public:
     bool isOneOf(tok::TokenKind K1, tok::TokenKind K2, Ts... Ks) const
     {
         return is(K1) || isOneOf(K2, Ks...);
+    }
+
+    [[nodiscard]] bool isOneOf(std::span<const tok::TokenKind> Klist) const {
+        return std::any_of(Klist.begin(),
+            Klist.end(),
+            [this](tok::TokenKind K) { return is(K); });
     }
 
     [[nodiscard]] const char * getName() const

@@ -7,11 +7,11 @@
 
 namespace mycc {
 
-class Declaration;
+class VarDeclaration;
 
 class Scope {
     Scope * parentScope;
-    StringMap<Declaration*> Symbols;
+    StringMap<VarDeclaration*> Symbols;
 
     // Track variables declared in this scope (original names)
     std::vector<std::string> DeclaredVariables;
@@ -19,9 +19,9 @@ class Scope {
 public:
     Scope(Scope * parentScope = nullptr) : parentScope(parentScope) {}
 
-    bool insert(Declaration *declaration);
-    bool insert(StringRef key, Declaration *declaration);
-    Declaration * lookup(StringRef Name);
+    bool insert(VarDeclaration *declaration);
+    bool insert(StringRef key, VarDeclaration *declaration);
+    VarDeclaration * lookup(StringRef Name);
 
     void addDeclaredVariable(StringRef originalName);
     const std::vector<std::string>& getDeclaredVariables() const { return DeclaredVariables; }
