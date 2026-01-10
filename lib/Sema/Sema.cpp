@@ -4,11 +4,23 @@
 
 using namespace mycc;
 
+/**
+ * @brief Enter a new function scope by clearing function-level label tracking.
+ *
+ * This method resets the FunctionLabels and GotoLabels sets to prepare
+ * for semantic analysis of a new function.
+ */
 void Sema::enterFunction() {
     FunctionLabels.clear();
     GotoLabels.clear();
 }
 
+/**
+ * @brief Exit function scope and validate that all goto labels are defined.
+ *
+ * After processing a function, this validates that every goto statement
+ * references a label that was actually defined in the function.
+ */
 void Sema::exitFunction() {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
@@ -34,7 +46,7 @@ void Sema::exitScope() {
     assert(CurrentScope && "Can't exit non-existing scope");
 
     // Pop variables that were declared in this scope
-    popVariablesFromScope(CurrentScope->getDeclaredVariables());
+    popVariablesFromScope(CurrentScope->getDeclaredIdentifiers());
 
     Scope *Parent = CurrentScope->getParentScope();
     // delete current scope
@@ -46,6 +58,16 @@ std::string Sema::generateLoopLabel() {
     return "loop_" + std::to_string(LoopLabelCounter++);
 }
 
+/**
+ * @brief Assign unique labels to all loops, breaks, and continues in a function.
+ *
+ * This method traverses the function body and assigns labels to:
+ * - Loop statements (while, do-while, for) for break and continue targets
+ * - Switch statements for break targets
+ * - Break and continue statements to reference their appropriate targets
+ *
+ * @param F The function to process.
+ */
 void Sema::assignLoopLabels(Function &F) {
     // Labels for the breaks
     std::vector<BreakableContext> breakableStack;
@@ -86,6 +108,19 @@ int64_t Sema::evaluateConstantExpression(Expr *expr) {
     return 0;
 }
 
+/**
+ * @brief Validate the body of a switch statement recursively.
+ *
+ * Performs the following validations:
+ * 1. Case values must be constant expressions
+ * 2. No duplicate case values
+ * 3. At most one default case
+ * 4. No variable declarations immediately after case/default labels
+ *
+ * @param body Switch body statement to validate.
+ * @param seenCaseValues Set to track and detect duplicate case values.
+ * @param hasDefault Flag indicating if a default case has been seen.
+ */
 void Sema::validateSwitchBody(Statement *body,
                               std::set<int64_t> &seenCaseValues,
                               bool &hasDefault) {
@@ -176,6 +211,19 @@ void Sema::validateSwitchBody(Statement *body,
     }
 }
 
+/**
+ * @brief Recursively traverse a statement and assign labels for control flow.
+ *
+ * This method handles:
+ * - Loops (while, do-while, for): assigns base labels and processes break/continue
+ * - Switch statements: assigns break label and validates cases
+ * - Break statements: links to innermost breakable context
+ * - Continue statements: links to innermost loop context
+ * - Compound and conditional statements: recursively processes children
+ *
+ * @param stmt Statement to traverse.
+ * @param breakableStack Stack of enclosing breakable contexts for break/continue resolution.
+ */
 void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &breakableStack) {
     if (!stmt) return;
 
@@ -383,11 +431,49 @@ Program *Sema::actOnProgramDeclaration(FuncList &Funcs) {
 }
 
 Function *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) {
+    if (IdentifierNameStacks.contains(Name)) {
+        auto &prev_entry = IdentifierNameStacks[Name].back();
+        if (prev_entry.from_current_scope && !prev_entry.has_linkage) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::erro_func_already_declared, Name.str());
+                return nullptr;
+            }
+        }
+    }
+
+    // Add a new entry with current scope, and linkage
+    IdentifierNameStacks[Name].emplace_back(Name.str(), true, true);
+
     auto *func = Context.createFunction<Function>(Name, Loc, args);
+
+    // Add the entry to the list of declared identifiers, because
+    // of how sometimes the functions are declared we have to check
+    // if there's a parent scope (where the function is really declared)
+    // or if there's not, we are in the global scope
+    auto *parent_scope = CurrentScope->getParentScope();
+    if (parent_scope == nullptr) {
+        CurrentScope->addDeclaredIdentifier(Name);
+        CurrentScope->insert(func);
+    } else {
+        parent_scope->addDeclaredIdentifier(Name);
+        parent_scope->insert(func);
+    }
+
 
     return func;
 }
 
+/**
+ * @brief Process a function parameter declaration.
+ *
+ * Creates a unique name for the parameter, adds it to the current scope,
+ * and tracks it for variable name resolution. Reports an error if a
+ * parameter with the same name already exists in the current scope.
+ *
+ * @param Loc Source location of the parameter declaration.
+ * @param Name Parameter name.
+ * @return Pointer to created Var node with unique name, or nullptr on error.
+ */
 Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
     // Generate unique name and track it
     StringRef originalName = Name;
@@ -409,12 +495,24 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
             }
         }
 
-        CurrentScope->addDeclaredVariable(originalName);
+        CurrentScope->addDeclaredIdentifier(originalName);
     }
 
     return var;
 }
 
+/**
+ * @brief Process a variable declaration and add it to the current scope.
+ *
+ * Creates a unique name for the variable, adds it to the current scope,
+ * and appends the declaration to the block items. Reports an error if
+ * a variable with the same name already exists in the current scope.
+ *
+ * @param Items Block items list to append the declaration to.
+ * @param Loc Source location of the variable declaration.
+ * @param Name Variable name.
+ * @return true if a duplicate declaration error occurred, false on success.
+ */
 bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
     // Generate unique name and track it
     StringRef originalName = Name;
@@ -438,7 +536,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
         }
 
         // Track that this variable was declared in the current scope
-        CurrentScope->addDeclaredVariable(originalName);
+        CurrentScope->addDeclaredIdentifier(originalName);
     }
 
     Items.emplace_back(decl);
@@ -564,13 +662,27 @@ PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixO
     return Context.createExpression<PostfixOperator>(Loc, Kind, expr);
 }
 
+/**
+ * @brief Resolve an identifier to its unique variable name.
+ *
+ * Performs variable name lookup through the scope chain. If the variable
+ * is found in an enclosing scope, returns a Var node with its unique name.
+ * Reports an error if the variable is used before being declared.
+ *
+ * This method implements variable name shadowing by using the most recent
+ * (innermost scope) declaration of a variable.
+ *
+ * @param Loc Source location of the identifier.
+ * @param Name Variable name to look up.
+ * @return Pointer to Var node with the unique name, or nullptr if undeclared.
+ */
 Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     // Look up the variable in current scope
     if (CurrentScope) {
         // We make a lookup by name, this lookup will traverse
         // all the scopes from current through parents looking
         /// for the variable.
-        VarDeclaration *decl = CurrentScope->lookup(Name);
+        VarDeclaration *decl = CurrentScope->lookupForVar(Name);
         if (!decl) {
             if (!avoid_errors) {
                 // Issue error for potentially undefined variable
@@ -591,38 +703,98 @@ ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Exp
     return Context.createExpression<ConditionalExpr>(left, middle, right);
 }
 
-FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc, StringRef name, ExprList &args) {
+/**
+ * @brief Create a function call expression with proper name resolution.
+ *
+ * Looks up the function name in the identifier stack. If found, uses the
+ * unique name from the stack entry. Reports an error if the function
+ * hasn't been declared.
+ *
+ * @param Loc Source location of the function call.
+ * @param name Function name to look up.
+ * @param args List of argument expressions.
+ * @return Pointer to the created FunctionCallExpr node, or nullptr on error.
+ */
+FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) {
+    if (IdentifierNameStacks.contains(name)) {
+        const MapEntry &entry = IdentifierNameStacks[name].back();
+        return Context.createExpression<FunctionCallExpr>(entry.new_name, args);
+    }
+    if (!avoid_errors) {
+        // Issue error for potentially undefined function
+        Diags.report(Loc, diag::err_func_used_before_declared, name.str());
+        return nullptr;
+    }
     return Context.createExpression<FunctionCallExpr>(name, args);
 }
 
+/**
+ * @brief Generate a unique variable name by appending a counter.
+ *
+ * Creates a unique variable name by combining the original name with
+ * a sequential counter. This enables variable shadowing and ensures
+ * each variable declaration has a distinct name in the IR.
+ *
+ * @param originalName Original variable name from source code.
+ * @return Unique variable name (e.g., "x_0", "x_1").
+ */
 std::string Sema::generateUniqueVarName(StringRef originalName) {
     return originalName.str() + "_" + std::to_string(VariableCounter++);
 }
 
+/**
+ * @brief Push a unique variable name onto the name stack for shadowing support.
+ *
+ * Maintains a stack of unique names for each original variable name,
+ * enabling proper handling of variable shadowing across nested scopes.
+ * For variables, from_current_scope is set to true and has_linkage to false.
+ *
+ * @param originalName Original variable name from source code.
+ * @param uniqueName Generated unique name to push onto the stack.
+ */
 void Sema::pushVariableName(StringRef originalName, const std::string &uniqueName) {
     // We keep unique names instead of the original ones
     // it will be easier for later generating the intermediate
     // representation
-    VariableNameStacks[originalName].push_back(uniqueName);
+    // Variables: from_current_scope = true, has_linkage = false
+    IdentifierNameStacks[originalName].emplace_back(uniqueName, true, false);
 }
 
+/**
+ * @brief Get the current unique name for a variable (top of name stack).
+ *
+ * Retrieves the most recent unique name for a given original variable name.
+ * This returns the name from the innermost scope where the variable is declared.
+ *
+ * @param originalName Original variable name to look up.
+ * @return Current unique name, or the original name if not found in stack.
+ */
 std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
     // Look in the map of variable names, look for the last one.
-    auto it = VariableNameStacks.find(originalName);
-    if (it != VariableNameStacks.end() && !it->second.empty()) {
-        return it->second.back();
+    auto it = IdentifierNameStacks.find(originalName);
+    if (it != IdentifierNameStacks.end() && !it->second.empty()) {
+        return it->second.back().new_name;
     }
     return originalName.str();
 }
 
+/**
+ * @brief Pop variables from the name stack when exiting a scope.
+ *
+ * Removes variable names from the name stacks when exiting a scope,
+ * restoring the previous shadowed names (if any) or removing the name
+ * from tracking entirely.
+ *
+ * @param declaredVars List of original variable names declared in the exiting scope.
+ */
 void Sema::popVariablesFromScope(const std::vector<std::string> &declaredVars) {
     // Once we go out from a scope (a block), we have to
     // remove all the declared variables from the variable
     // name stacks, so we do not keep the unique generated
     // names.
     for (const std::string &varName: declaredVars) {
-        auto it = VariableNameStacks.find(varName);
-        if (it != VariableNameStacks.end() && !it->second.empty()) {
+        auto it = IdentifierNameStacks.find(varName);
+        if (it != IdentifierNameStacks.end() && !it->second.empty()) {
             it->second.pop_back();
         }
     }

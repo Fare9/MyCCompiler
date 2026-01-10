@@ -8,6 +8,8 @@ DIAG(err_invalid_suffix_integer, Error, "invalid suffix '{0}' on integer literal
 
 DIAG(err_duplicate_variable_declaration, Error, "variable '{}' has already been defined")
 DIAG(err_var_used_before_declared, Error, "Variable '{}' used but not defined")
+DIAG(err_func_used_before_declared, Error, "Function '{}' used but not defined")
+DIAG(erro_func_already_declared, Error, "Function '{}' has already been declared")
 DIAG(err_incorrect_lvalue, Error, "Invalid lvalue used")
 DIAG(err_existing_label, Error, "Error, the label {} already exists in the function")
 DIAG(err_undefined_label, Error, "use of undeclared label '{}'")

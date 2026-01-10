@@ -16,6 +16,9 @@ Program *Parser::parse() {
 bool Parser::parseProgram(Program *&P) {
     FuncList Funcs;
 
+    // Enter a global scope for function declarations a global variables
+    Actions.enterScope();
+
     // advance to the first token
     advance();
     // now start consuming functions
@@ -28,6 +31,9 @@ bool Parser::parseProgram(Program *&P) {
     }
 
     P = Actions.actOnProgramDeclaration(Funcs);
+
+    // Exit global scope after all functions parsed
+    Actions.exitScope();
     return false;
 }
 
@@ -84,8 +90,9 @@ bool Parser::parseFunction(Function *&F) {
                 return _errorhandler();
 
             param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
-            if (param)
-                args.push_back(param);
+            if (!param)
+                return _errorhandler();
+            args.push_back(param);
             advance();
         }
     }
@@ -106,7 +113,7 @@ bool Parser::parseFunction(Function *&F) {
         // Parse statement sequence - fail immediately on error
         if (parseBlock(body))
             return _errorhandler();
-        Actions.exitScope();
+
         if (consume(tok::r_brace))
             return _errorhandler();
         F->setBody(body);
@@ -118,6 +125,8 @@ bool Parser::parseFunction(Function *&F) {
     // we can assign the labels to the loop instructions
     // and the break/continue
     Actions.assignLoopLabels(*F);
+
+    Actions.exitScope();
 
     return true;
 }
@@ -590,6 +599,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     if (consume(tok::l_paren))
         return true;
 
+    Actions.enterScope();
+
     if (Tok.is(tok::kw_void)) {
         advance();
     } else if (!Tok.is(tok::r_paren)) {
@@ -627,6 +638,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     if (Tok.is(tok::semi)) {
         advance();
     } else {
+        if (!Actions.is_avoid_errors_active())
+            return true;
         // consume body
         BlockItems body;
         if (consume(tok::l_brace))
@@ -638,6 +651,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
             return true;
         F->setBody(body);
     }
+
+    Actions.exitScope();
 
     Items.emplace_back(F);
     return false;
@@ -771,7 +786,7 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
 
     // Parse as a left part a factor
     if (parseFactor(left))
-        _errorhandler();
+        return _errorhandler();
 
     while (Tok.isOneOf(exprOps)) {
         // Compound statements
@@ -918,6 +933,8 @@ bool Parser::parseFactor(Expr *&E) {
                 return _errorhandler();
 
             E = Actions.actOnFunctionCallOperator(Loc, name, args);
+            if (!E)
+                return true;
         } else {
             E = Actions.actOnIdentifier(Loc, name);
             if (!E)
