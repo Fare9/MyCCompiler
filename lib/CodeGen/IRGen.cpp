@@ -6,22 +6,43 @@ using namespace mycc::codegen;
 
 void IRGenerator::generateIR(const Program &ASTProgram) {
     // Convert each AST function to IR function
-    for (const Function *ASTFunc: ASTProgram) {
+    for (const FunctionDeclaration *ASTFunc: ASTProgram) {
         ir::Function *IRFunc = generateFunction(*ASTFunc);
         IRProg.add_function(IRFunc);
     }
 }
 
-ir::Function *IRGenerator::generateFunction(const Function &ASTFunc) {
+ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) {
     // Create new IR function
     ir::InstList instructions;
     auto *IRFunc = new ir::Function(instructions, ASTFunc.getName());
+
+    // Track function parameters and variables declared at function level
+    std::vector<std::string> funcDeclaredVars;
+
+    // Handle function parameters - rename them
+    // Cast away const temporarily to access getArg
+    FunctionDeclaration *nonConstFunc = const_cast<FunctionDeclaration*>(&ASTFunc);
+    for (size_t i = 0; i < 100; i++) {  // Arbitrary limit
+        Var *param = nonConstFunc->getArg(i);
+        if (!param) break;
+
+        StringRef paramName = param->getName();
+        std::string uniqueName = generateUniqueVarName(paramName);
+        VariableRenameStack[paramName].push_back(uniqueName);
+        funcDeclaredVars.push_back(paramName.str());
+    }
 
     // simple fix for now, we generate a Return(0) if no Return exists
     bool containsReturn = false;
 
     // Generate IR for each statement in the function
     for (const BlockItem &Item: ASTFunc) {
+        // Track top-level variable declarations
+        if (std::holds_alternative<VarDeclaration *>(Item)) {
+            VarDeclaration *Decl = std::get<VarDeclaration *>(Item);
+            funcDeclaredVars.push_back(Decl->getVar()->getName().str());
+        }
         containsReturn |= generateBlockItem(Item, IRFunc);
     }
 
@@ -30,6 +51,9 @@ ir::Function *IRGenerator::generateFunction(const Function &ASTFunc) {
         ir::Ret *RetInst = Ctx.createRet(RetVal);
         IRFunc->add_instruction(RetInst);
     }
+
+    // Exit function scope - pop all parameters and top-level variables
+    exitScope(funcDeclaredVars);
 
     return IRFunc;
 }
@@ -119,18 +143,26 @@ void IRGenerator::generateStatement(const Statement &Stmt, ir::Function *IRFunc)
 }
 
 void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *IRFunc) {
-    if (Decl.getExpr() == nullptr) return;
     const auto *left = Decl.getVar();
-    const auto *right = Decl.getExpr();
+    StringRef originalName = left->getName();
 
-    // We create a Declaration like an assignment in case
-    // this one has an expression
+    // Generate unique name for this variable
+    std::string uniqueName = generateUniqueVarName(originalName);
 
-    // First we emit the right part of the assignment
-    auto *result = generateExpression(*right, IRFunc);
-    // Now we create a copy that we include in functions
-    auto *varop = generateExpression(*left, IRFunc);
-    IRFunc->add_instruction(Ctx.createCopy(result, varop));
+    // Push the unique name onto the rename stack
+    VariableRenameStack[originalName].push_back(uniqueName);
+
+    // If there's an initializer expression, generate the assignment
+    if (Decl.getExpr() != nullptr) {
+        const auto *right = Decl.getExpr();
+
+        // First emit the right part of the assignment
+        auto *result = generateExpression(*right, IRFunc);
+
+        // Create IR variable with the unique name
+        auto *varop = Ctx.getOrCreateVar(uniqueName);
+        IRFunc->add_instruction(Ctx.createCopy(result, varop));
+    }
 }
 
 void IRGenerator::generateReturnStmt(const Statement &Stmt, ir::Function *IRFunc) {
@@ -182,11 +214,22 @@ void IRGenerator::generateGotoStmt(const Statement &Stmt, ir::Function *IRFunc) 
 
 void IRGenerator::generateCompoundStmt(const Statement &Stmt, ir::Function *IRFunc) {
     const auto &Compound = dynamic_cast<const CompoundStatement &>(Stmt);
-    // managing compound statement is exactly the same
-    // as managing a function block.
+
+    // Track variables declared in this compound statement
+    std::vector<std::string> declaredVars;
+
+    // Process each block item
     for (const BlockItem &Item: Compound) {
+        // If it's a variable declaration, track it
+        if (std::holds_alternative<VarDeclaration *>(Item)) {
+            VarDeclaration *Decl = std::get<VarDeclaration *>(Item);
+            declaredVars.push_back(Decl->getVar()->getName().str());
+        }
         generateBlockItem(Item, IRFunc);
     }
+
+    // Exit scope - pop all variables declared in this compound statement
+    exitScope(declaredVars);
 }
 
 void IRGenerator::generateWhileStmt(const Statement &Stmt, ir::Function *IRFunc) {
@@ -264,9 +307,13 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
     auto label_continue = Ctx.getOrCreateLabel(for_label_continue, true);
     auto label_end = Ctx.getOrCreateLabel(for_end, true);
 
+    // Track variable declared in for-loop init (if any)
+    std::vector<std::string> forDeclaredVars;
+
     // Now we generate a declaration or an expression
     if (std::holds_alternative<VarDeclaration *>(For.getInit())) {
         auto *decl = std::get<VarDeclaration *>(For.getInit());
+        forDeclaredVars.push_back(decl->getVar()->getName().str());
         generateDeclaration(*decl, IRFunc);
     } else if (std::holds_alternative<Expr *>(For.getInit())) {
         auto *expr = std::get<Expr *>(For.getInit());
@@ -301,6 +348,9 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
 
     // Place end label
     IRFunc->add_instruction(label_end);
+
+    // Exit scope for any variable declared in for-loop init
+    exitScope(forDeclaredVars);
 }
 
 void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc) {
@@ -371,9 +421,9 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
     switch (Expr.getKind()) {
         case Expr::Ek_Var: {
             const auto &var = dynamic_cast<const Var &>(Expr);
-            // Create a Var with the information from the one
-            // of the AST
-            return Ctx.getOrCreateVar(var.getName());
+            // Look up the renamed name for this variable
+            std::string irName = getIRName(var.getName());
+            return Ctx.getOrCreateVar(irName);
         }
         case Expr::Ek_AssignmentOperator: {
             const auto &assignment = dynamic_cast<const AssignmentOperator &>(Expr);
@@ -749,5 +799,38 @@ void IRGenerator::collectSwitchCases(
         // Other statements don't contain cases
         default:
             break;
+    }
+}
+
+// Variable renaming helper methods
+
+std::string IRGenerator::generateUniqueVarName(StringRef originalName) {
+    return originalName.str() + "_" + std::to_string(VariableCounter++);
+}
+
+std::string IRGenerator::getIRName(StringRef originalName) {
+    auto it = VariableRenameStack.find(originalName);
+    if (it != VariableRenameStack.end() && !it->second.empty()) {
+        return it->second.back();
+    }
+    // If not found in rename stack, use original name
+    return originalName.str();
+}
+
+void IRGenerator::enterScope() {
+    // Scopes are tracked implicitly by the rename stack
+    // No explicit action needed here for now
+}
+
+void IRGenerator::exitScope(const std::vector<std::string> &declaredVars) {
+    // Pop variables that were declared in this scope from the rename stack
+    for (const std::string &varName : declaredVars) {
+        auto it = VariableRenameStack.find(varName);
+        if (it != VariableRenameStack.end() && !it->second.empty()) {
+            it->second.pop_back();
+            if (it->second.empty()) {
+                VariableRenameStack.erase(it);
+            }
+        }
     }
 }

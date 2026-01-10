@@ -13,7 +13,7 @@ namespace mycc {
 class Statement;
 class Expr;
 class VarDeclaration;
-class Function;
+class FunctionDeclaration;
 class Program;
 
 class ASTContext {
@@ -25,7 +25,7 @@ class ASTContext {
     std::deque<std::unique_ptr<Statement>> Statements;
     std::deque<std::unique_ptr<Expr>> Expressions;
     std::deque<std::unique_ptr<VarDeclaration>> Declarations;
-    std::deque<std::unique_ptr<Function>> Functions;
+    std::deque<std::unique_ptr<FunctionDeclaration>> Functions;
     std::deque<std::unique_ptr<Program>> Programs;
     
 public:

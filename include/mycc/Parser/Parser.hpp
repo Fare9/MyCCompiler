@@ -94,7 +94,7 @@ class Parser {
     /// @param P program to parse
     /// @return `true` if parsing was well, `false` otherwise
     bool parseProgram(Program *&P);
-    bool parseFunction(Function *&F);
+    bool parseFunction(FunctionDeclaration *&F);
 
     bool parseBlock(BlockItems& Items);
     bool parseVarDeclaration(BlockItems& Items);

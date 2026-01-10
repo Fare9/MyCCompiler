@@ -10,6 +10,10 @@ class IRGenerator {
     ir::Context& Ctx;
     ir::Program& IRProg;
 
+    // Variable renaming for SSA-style naming
+    unsigned int VariableCounter = 0;
+    StringMap<std::vector<std::string>> VariableRenameStack;
+
     struct CaseInfo {
         Expr * value;
         std::string label;
@@ -21,8 +25,14 @@ class IRGenerator {
         std::string& defaultLabel,
         bool& hasDefault);
 
+    // Variable renaming helper methods
+    std::string generateUniqueVarName(StringRef originalName);
+    std::string getIRName(StringRef originalName);
+    void enterScope();
+    void exitScope(const std::vector<std::string> &declaredVars);
+
 public:
-    IRGenerator(ir::Context& Ctx, ir::Program& IRProg) 
+    IRGenerator(ir::Context& Ctx, ir::Program& IRProg)
         : Ctx(Ctx), IRProg(IRProg) {}
     
     // Convert AST Program to IR Program
@@ -30,7 +40,7 @@ public:
     
 private:
     // Convert AST Function to IR Function
-    ir::Function* generateFunction(const Function& ASTFunc);
+    ir::Function* generateFunction(const FunctionDeclaration& ASTFunc);
 
     bool generateBlockItem(const BlockItem& Item, ir::Function* IRFunc);
     // Convert AST Statement to IR Instructions

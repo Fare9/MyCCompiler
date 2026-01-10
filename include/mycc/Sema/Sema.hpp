@@ -30,41 +30,6 @@ namespace mycc {
         Scope *CurrentScope;
         bool avoid_errors = false;
 
-        /**
-         * @brief Entry in the identifier name stack with metadata.
-         *
-         * Tracks information about identifiers (variables and functions):
-         * - new_name: The unique renamed identifier for this declaration
-         * - from_current_scope: Whether declared in the current scope (true for variables)
-         * - has_linkage: Whether has external/internal linkage (true for functions, false for variables)
-         */
-        struct MapEntry {
-            std::string new_name;           ///< Unique renamed identifier
-            bool from_current_scope;        ///< True if declared in current scope
-            bool has_linkage;               ///< True for functions, false for variables
-
-            /**
-             * @brief Construct a new MapEntry
-             * @param name Unique identifier name
-             * @param current_scope Whether from current scope
-             * @param linkage Whether has linkage (functions)
-             */
-            MapEntry(std::string name, bool current_scope, bool linkage)
-                : new_name(std::move(name)), from_current_scope(current_scope), has_linkage(linkage) {}
-        };
-
-        /**
-         * @brief Identifier name stack for variables and functions.
-         *
-         * Maps original identifier names to a stack of MapEntry records, supporting:
-         * - Variable shadowing across nested scopes
-         * - Function name tracking with linkage information
-         * - Scope-aware name resolution
-         */
-        StringMap<std::vector<MapEntry> > IdentifierNameStacks;
-
-        // Counter for generating unique variable names
-        unsigned int VariableCounter;
 
         // Set that contains for a method the labels
         std::set<StringRef> FunctionLabels;
@@ -77,44 +42,6 @@ namespace mycc {
         unsigned int SwitchLabelCounter = 0;
         unsigned int CaseLabelCounter = 0;
         unsigned int DefaultLabelCounter = 0;
-
-        // Helper methods for variable name management
-
-        /**
-         * @brief Generate a new variable name that will be unique including a
-         * sequential number.
-         *
-         * @param originalName original name of the variable.
-         * @return new unique name.
-         */
-        std::string generateUniqueVarName(StringRef originalName);
-
-        /**
-         * @brief Get the std::vector with the unique names from the map of variable names
-         * and push the new unique name onto the vector.
-         *
-         * @param originalName original name for a variable.
-         * @param uniqueName new unique name for that variable.
-         */
-        void pushVariableName(StringRef originalName, const std::string &uniqueName);
-
-        /**
-         * @brief Look for the last unique variable name that is on the stack (scope of variable names).
-         * If vector is not empty, the last unique var name is returned, if not the original name
-         * is returned.
-         *
-         * @param originalName variable name to look for.
-         * @return last unique variable name, or the original name.
-         */
-        std::string getCurrentUniqueVarName(StringRef originalName);
-
-        /**
-         * @brief Remove the varaible from the scope given a list of declared variables
-         * the variables go out from the scope we remove them.
-         *
-         * @param declaredVars vars declared on the scope.
-         */
-        void popVariablesFromScope(const std::vector<std::string> &declaredVars);
 
         /**
          * @brief We keep this structure to maintain the context for the break instructions.
@@ -265,7 +192,7 @@ namespace mycc {
          * @brief Assign unique labels to loops, breaks, and continues in a function.
          * @param F The function to process.
          */
-        void assignLoopLabels(Function &F);
+        void assignLoopLabels(FunctionDeclaration &F);
 
         /**
          * @brief Create a Program node from a list of functions.
@@ -281,7 +208,7 @@ namespace mycc {
          * @param args Function parameters.
          * @return Pointer to the created Function node.
          */
-        Function *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args);
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.

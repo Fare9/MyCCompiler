@@ -16,17 +16,17 @@
 
 namespace mycc {
     class Program;
-    class Function;
+    class FunctionDeclaration;
     class Statement;
     class VarDeclaration;
     class Expr;
 
     using ExprList = std::vector<Expr *>;
     using StmtList = std::vector<Statement *>;
-    using BlockItem = std::variant<Statement *, VarDeclaration *, Function*, std::monostate>;
+    using BlockItem = std::variant<Statement *, VarDeclaration *, FunctionDeclaration*, std::monostate>;
     using ForInit = std::variant<VarDeclaration *, Expr *, std::monostate>;
     using BlockItems = std::vector<BlockItem>;
-    using FuncList = std::vector<Function *>;
+    using FuncList = std::vector<FunctionDeclaration *>;
 
     // Base classes
 
@@ -815,17 +815,17 @@ namespace mycc {
         }
     };
 
-    class Function {
+    class FunctionDeclaration {
         SMLoc Loc;
         StringRef Name;
         ArgsList args;
         BlockItems body;
 
     public:
-        Function(StringRef Name, SMLoc Loc, ArgsList args) : Name(Name), Loc(Loc), args(std::move(args)) {
+        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args) : Name(Name), Loc(Loc), args(std::move(args)) {
         }
 
-        ~Function() = default;
+        ~FunctionDeclaration() = default;
 
         [[nodiscard]] StringRef getName() const {
             return Name;
@@ -888,7 +888,7 @@ namespace mycc {
             functions = std::move(funcs);
         }
 
-        void add_function(Function *func) {
+        void add_function(FunctionDeclaration *func) {
             functions.push_back(func);
         }
 
@@ -896,7 +896,7 @@ namespace mycc {
             return functions.size();
         }
 
-        Function *get_function(size_t i) {
+        FunctionDeclaration *get_function(size_t i) {
             return i >= functions.size() ? nullptr : functions[i];
         }
 

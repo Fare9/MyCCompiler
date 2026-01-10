@@ -23,7 +23,7 @@ bool Parser::parseProgram(Program *&P) {
     advance();
     // now start consuming functions
     while (Tok.isNot(tok::eof)) {
-        Function *Func = nullptr;
+        FunctionDeclaration *Func = nullptr;
         if (!parseFunction(Func)) {
             return false;
         }
@@ -37,7 +37,7 @@ bool Parser::parseProgram(Program *&P) {
     return false;
 }
 
-bool Parser::parseFunction(Function *&F) {
+bool Parser::parseFunction(FunctionDeclaration *&F) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
@@ -146,6 +146,7 @@ bool Parser::parseBlock(BlockItems &Items) {
                 // Since we can't easily peek 2 tokens, we'll consume and check
                 advance(); // consume 'int'
                 StringRef name = Tok.getIdentifier();
+
                 SMLoc loc = Tok.getLocation();
                 advance(); // consume identifier
 
@@ -633,7 +634,7 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         return true;
 
     // Create a Function object with no body (declaration only)
-    Function *F = Actions.actOnFunctionDeclaration(Loc, Name, args);
+    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args);
 
     if (Tok.is(tok::semi)) {
         advance();

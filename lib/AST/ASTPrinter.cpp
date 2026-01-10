@@ -18,11 +18,11 @@ std::string ASTPrinter::print(const Program* program, int indent) {
     return output;
 }
 
-std::string ASTPrinter::print(const Function* function) {
+std::string ASTPrinter::print(const FunctionDeclaration* function) {
     return print(function, 0);
 }
 
-std::string ASTPrinter::print(const Function* function, int indent) {
+std::string ASTPrinter::print(const FunctionDeclaration* function, int indent) {
     if (!function) return getIndent(indent) + "null\n";
 
     std::string output = getIndent(indent) + "Function: " + function->getName().str() + "\n";
@@ -49,8 +49,8 @@ std::string ASTPrinter::print(const Function* function, int indent) {
             output += print(std::get<Statement*>(item), indent + 2);
         else if (std::holds_alternative<VarDeclaration*>(item))
             output += print(std::get<VarDeclaration*>(item), indent + 2);
-        else if (std::holds_alternative<Function*>(item))
-            output += print(std::get<Function*>(item), indent + 2);
+        else if (std::holds_alternative<FunctionDeclaration*>(item))
+            output += print(std::get<FunctionDeclaration*>(item), indent + 2);
     }
 
     if (!hasBody) {
@@ -352,6 +352,8 @@ std::string ASTPrinter::printCompoundStatement(const CompoundStatement* stmt, in
             output += print(std::get<Statement*>(item), indent + 1);
         } else if (std::holds_alternative<VarDeclaration*>(item)) {
             output += print(std::get<VarDeclaration*>(item), indent + 1);
+        } else if (std::holds_alternative<FunctionDeclaration*>(item)) {
+            output += print(std::get<FunctionDeclaration*>(item), indent + 1);
         }
     }
 

@@ -8,13 +8,13 @@ namespace mycc {
 class ASTPrinter {
 public:
     static std::string print(const Program* program);
-    static std::string print(const Function* function);
+    static std::string print(const FunctionDeclaration* function);
     static std::string print(const Statement* statement);
     static std::string print(const Expr* expr);
 
 private:
     static std::string print(const Program* program, int indent);
-    static std::string print(const Function* function, int indent);
+    static std::string print(const FunctionDeclaration* function, int indent);
     static std::string print(const Statement* statement, int indent);
     static std::string print(const Expr* expr, int indent);
     
