@@ -472,7 +472,6 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
     globalScope->addDeclaredIdentifier(Name);
     globalScope->insert(func, Linkage::External);
     if (parentScope && globalScope != parentScope) {
-        parentScope->addDeclaredIdentifier(Name);
         parentScope->insert(func, Linkage::External);
     }
 
