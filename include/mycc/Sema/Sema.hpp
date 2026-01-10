@@ -109,14 +109,14 @@ namespace mycc {
          * @param expr Expression to check.
          * @return true if the expression is a constant, false otherwise.
          */
-        bool isConstantExpression(Expr *expr);
+        static bool isConstantExpression(Expr *expr);
 
         /**
          * @brief Evaluate a constant expression to an integer value.
          * @param expr Constant expression to evaluate.
          * @return Integer value of the constant expression.
          */
-        int64_t evaluateConstantExpression(Expr *expr);
+        static int64_t evaluateConstantExpression(Expr *expr);
 
         /**
          * @brief Validate the body of a switch statement.
@@ -140,7 +140,7 @@ namespace mycc {
         /**
          * @brief Verify all goto labels reference defined labels in the function.
          */
-        void checkGotoLabelsCorrectlyPointToFunction();
+        void checkGotoLabelsCorrectlyPointToFunction() const;
 
     public:
         /**
@@ -199,7 +199,7 @@ namespace mycc {
          * @param Funcs List of functions in the program.
          * @return Pointer to the created Program node.
          */
-        Program *actOnProgramDeclaration(FuncList &Funcs);
+        Program *actOnProgramDeclaration(FuncList &Funcs) const;
 
         /**
          * @brief Create a Function node.
@@ -208,7 +208,7 @@ namespace mycc {
          * @param args Function parameters.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args);
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const;
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
@@ -216,7 +216,7 @@ namespace mycc {
          * @param Name Parameter name.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name);
+        Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Process a variable declaration and add it to the current scope.
@@ -225,7 +225,7 @@ namespace mycc {
          * @param Name Variable name.
          * @return true on error (duplicate declaration), false on success.
          */
-        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name);
+        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Create a return statement.
@@ -233,14 +233,14 @@ namespace mycc {
          * @param Loc Source location of the return statement.
          * @param RetVal Return value expression (may be null for void return).
          */
-        void actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal);
+        void actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const;
 
         /**
          * @brief Create a null (empty) statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the null statement.
          */
-        void actOnNullStatement(BlockItems &Items, SMLoc Loc);
+        void actOnNullStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create an expression statement.
@@ -248,7 +248,7 @@ namespace mycc {
          * @param Loc Source location of the expression statement.
          * @param Expr Expression to evaluate.
          */
-        void actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr);
+        void actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) const;
 
         /**
          * @brief Create an if statement with optional else clause.
@@ -258,7 +258,7 @@ namespace mycc {
          * @param then_st Then branch statement.
          * @param else_st Else branch statement (may be null).
          */
-        void actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st);
+        void actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) const;
 
         /**
          * @brief Create a compound statement (block).
@@ -266,7 +266,7 @@ namespace mycc {
          * @param Loc Source location of the compound statement.
          * @param compoundStatement Block items contained in the compound statement.
          */
-        void actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement);
+        void actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) const;
 
         /**
          * @brief Create a label statement and register it in the function.
@@ -291,7 +291,7 @@ namespace mycc {
          * @param Cond Loop condition expression.
          * @param Body Loop body statement.
          */
-        void actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body);
+        void actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const;
 
         /**
          * @brief Create a do-while loop statement.
@@ -300,7 +300,7 @@ namespace mycc {
          * @param Body Loop body statement.
          * @param Cond Loop condition expression.
          */
-        void actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond);
+        void actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) const;
 
         /**
          * @brief Create a for loop statement.
@@ -311,28 +311,28 @@ namespace mycc {
          * @param Post Post-iteration expression.
          * @param Body Loop body statement.
          */
-        void actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body);
+        void actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body) const;
 
         /**
          * @brief Create a break statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the break statement.
          */
-        void actOnBreakStatement(BlockItems &Items, SMLoc Loc);
+        void actOnBreakStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a continue statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the continue statement.
          */
-        void actOnContinueStatement(BlockItems &Items, SMLoc Loc);
+        void actOnContinueStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a default case statement for switch.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the default statement.
          */
-        void actOnDefaultStatement(BlockItems &Items, SMLoc Loc);
+        void actOnDefaultStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a case statement for switch.
@@ -340,7 +340,7 @@ namespace mycc {
          * @param Loc Source location of the case statement.
          * @param Cond Case value expression (must be constant).
          */
-        void actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond);
+        void actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) const;
 
         /**
          * @brief Create a switch statement.
@@ -349,7 +349,7 @@ namespace mycc {
          * @param Cond Switch condition expression.
          * @param Body Switch body statement (typically a compound statement with cases).
          */
-        void actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body);
+        void actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const;
 
 
         /**
@@ -358,7 +358,7 @@ namespace mycc {
          * @param Literal String representation of the integer.
          * @return Pointer to the created IntegerLiteral node.
          */
-        IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
+        IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -367,7 +367,7 @@ namespace mycc {
          * @param expr Operand expression.
          * @return Pointer to the created UnaryOperator node.
          */
-        UnaryOperator *actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr);
+        UnaryOperator *actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) const;
 
         /**
          * @brief Create a binary operator expression.
@@ -377,7 +377,7 @@ namespace mycc {
          * @param right Right operand expression.
          * @return Pointer to the created BinaryOperator node.
          */
-        BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right);
+        BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) const;
 
         /**
          * @brief Create an assignment expression and validate the lvalue.
@@ -386,7 +386,7 @@ namespace mycc {
          * @param right Right-hand side expression.
          * @return Pointer to the created AssignmentOperator node, or nullptr if left is not an lvalue.
          */
-        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right);
+        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const;
 
         /**
          * @brief Create a prefix increment/decrement expression and validate the lvalue.
@@ -395,7 +395,7 @@ namespace mycc {
          * @param expr Operand expression (must be an lvalue).
          * @return Pointer to the created PrefixOperator node, or nullptr if expr is not an lvalue.
          */
-        PrefixOperator *actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr);
+        PrefixOperator *actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) const;
 
         /**
          * @brief Create a postfix increment/decrement expression and validate the lvalue.
@@ -404,7 +404,7 @@ namespace mycc {
          * @param expr Operand expression (must be an lvalue).
          * @return Pointer to the created PostfixOperator node, or nullptr if expr is not an lvalue.
          */
-        PostfixOperator *actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr);
+        PostfixOperator *actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) const;
 
         /**
          * @brief Resolve an identifier to its unique variable name.
@@ -412,7 +412,7 @@ namespace mycc {
          * @param Name Variable name to look up.
          * @return Pointer to Var node with the unique name, or nullptr if undeclared.
          */
-        Var *actOnIdentifier(SMLoc Loc, StringRef Name);
+        Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Create a conditional (ternary) expression.
@@ -422,7 +422,7 @@ namespace mycc {
          * @param right False branch expression.
          * @return Pointer to the created ConditionalExpr node.
          */
-        ConditionalExpr *actOnTernaryOperator(SMLoc Loc, Expr *left, Expr *middle, Expr *right);
+        ConditionalExpr *actOnTernaryOperator(SMLoc Loc, Expr *left, Expr *middle, Expr *right) const;
 
         /**
          * @brief Create a function call expression. The calling function
@@ -433,7 +433,7 @@ namespace mycc {
          * @param args List of argument expressions.
          * @return Pointer to the created FunctionCallExpr node.
          */
-        FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args);
+        FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const;
     };
 
     /**

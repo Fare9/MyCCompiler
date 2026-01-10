@@ -55,8 +55,9 @@ FunctionDeclaration* Scope::lookupForFunction(StringRef Name) {
             if (std::holds_alternative<FunctionDeclaration*>(I->second.decl)) {
                 return std::get<FunctionDeclaration*>(I->second.decl);
             }
-            // Symbol exists but it's a VarDeclaration, not a function
-            // Continue searching in parent scopes
+            // Another thing was declared... So we should return nullptr
+            // because someone might be calling something else as a function...
+            return nullptr;
         }
         S = S->getParentScope(); // look for the symbol in parent scope
     }

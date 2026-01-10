@@ -28,7 +28,7 @@ void Sema::exitFunction() {
     }
 }
 
-void Sema::checkGotoLabelsCorrectlyPointToFunction() {
+void Sema::checkGotoLabelsCorrectlyPointToFunction() const {
     for (const auto &label: GotoLabels) {
         if (!FunctionLabels.contains(label)) {
             Diags.report(SMLoc(), diag::err_undefined_label, label.str());
@@ -420,31 +420,42 @@ void Sema::initialize() {
     CurrentScope = nullptr;
 }
 
-Program *Sema::actOnProgramDeclaration(FuncList &Funcs) {
+Program *Sema::actOnProgramDeclaration(FuncList &Funcs) const {
     auto *p = Context.createProgram<Program>();
     p->add_functions(Funcs);
     return p;
 }
 
-FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) {
+FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const {
     auto *func = Context.createFunction<FunctionDeclaration>(Name, Loc, args);
 
-    // Function declarations go into the parent scope (or current scope if at global level)
-    // because they can be declared inside a block but have function scope
-    auto *parent_scope = CurrentScope->getParentScope();
-    Scope *targetScope = (parent_scope == nullptr) ? CurrentScope : parent_scope;
+    // Function declarations always go into the global/file scope
+    // Even if declared inside a block, they have external linkage
+    // Loop up to find the global scope (the one with no parent)
+    Scope *globalScope = CurrentScope;
+    while (globalScope->getParentScope() != nullptr) {
+        globalScope = globalScope->getParentScope();
+    }
+    Scope *parentScope = CurrentScope->getParentScope();
 
-    if (targetScope->hasLinkageConflict(Name, Linkage::External)) {
+
+    if (parentScope && parentScope->hasLinkageConflict(Name, Linkage::External)) {
         if (!avoid_errors) {
             Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
             return nullptr;
         }
     }
     // Check if already declared in the target scope
-    if (targetScope->hasSymbolInCurrentScope(Name)) {
+    if (globalScope->hasSymbolInCurrentScope(Name)) {
         // Function redeclaration - lookup existing function
-        FunctionDeclaration* existing = targetScope->lookupForFunction(Name);
+        FunctionDeclaration *existing = globalScope->lookupForFunction(Name);
         if (existing) {
+            // We check now the number of parameters
+            if (existing->getArgs().size() != args.size() && !avoid_errors) {
+                Diags.report(Loc, diag::err_wrong_argument_count, Name, existing->getArgs().size(), args.size());
+                return nullptr;
+            }
+
             // Multiple declarations are allowed in C (e.g., forward declarations)
             // TODO: Later, check type compatibility between declarations
             // Return the EXISTING declaration so the body gets attached to the same object
@@ -458,8 +469,12 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
     }
 
     // First declaration - insert into target scope
-    targetScope->addDeclaredIdentifier(Name);
-    targetScope->insert(func, Linkage::External);
+    globalScope->addDeclaredIdentifier(Name);
+    globalScope->insert(func, Linkage::External);
+    if (parentScope && globalScope != parentScope) {
+        parentScope->addDeclaredIdentifier(Name);
+        parentScope->insert(func, Linkage::External);
+    }
 
     return func;
 }
@@ -475,7 +490,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
  * @param Name Parameter name.
  * @return Pointer to created Var node, or nullptr on error.
  */
-Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
+Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
     // Create Var with original name (no renaming)
     auto *var = Context.createExpression<Var>(Loc, Name);
 
@@ -509,13 +524,21 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
  * @param Name Variable name.
  * @return true if a duplicate declaration error occurred, false on success.
  */
-bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
+bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const {
     // Create declaration with original name (no renaming)
     auto *var = Context.createExpression<Var>(Loc, Name);
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
 
+
     // Add to current scope if it exists
     if (CurrentScope) {
+        // Check if there's already a symbol with a different linkage, to show a different error.
+        if (CurrentScope->hasLinkageConflict(Name, Linkage::None)) {
+            if (!avoid_errors) {
+                Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
+                return true;
+            }
+        }
         // We try to insert it, but another declaration exists
         // this is an error, in the same scope (block) two variables
         // cannot have the same name.
@@ -534,23 +557,23 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
     return false;
 }
 
-void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) {
+void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const {
     Items.emplace_back(Context.createStatement<ReturnStatement>(RetVal));
 }
 
-void Sema::actOnNullStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnNullStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<NullStatement>());
 }
 
-void Sema::actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) {
+void Sema::actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) const {
     Items.emplace_back(Context.createStatement<ExpressionStatement>(Expr));
 }
 
-void Sema::actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
+void Sema::actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) const {
     Items.emplace_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
 }
 
-void Sema::actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) {
+void Sema::actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) const {
     Items.emplace_back(Context.createStatement<CompoundStatement>(compoundStatement));
 }
 
@@ -573,65 +596,67 @@ void Sema::actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
     Items.emplace_back(Context.createStatement<GotoStatement>(Label));
 }
 
-void Sema::actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+void Sema::actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const {
     Items.emplace_back(Context.createStatement<WhileStatement>(Cond, Body));
 }
 
-void Sema::actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) {
+void Sema::actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) const {
     Items.emplace_back(Context.createStatement<DoWhileStatement>(Body, Cond));
 }
 
-void Sema::actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body) {
+void Sema::actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post,
+                             Statement *Body) const {
     Items.emplace_back(Context.createStatement<ForStatement>(Init, Cond, Post, Body));
 }
 
-void Sema::actOnBreakStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnBreakStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<BreakStatement>());
 }
 
-void Sema::actOnContinueStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnContinueStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<ContinueStatement>());
 }
 
-void Sema::actOnDefaultStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnDefaultStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<DefaultStatement>());
 }
 
-void Sema::actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) {
+void Sema::actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) const {
     Items.emplace_back(Context.createStatement<CaseStatement>(Cond));
 }
 
-void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const {
     Items.emplace_back(Context.createStatement<SwitchStatement>(Cond, Body));
 }
 
-IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
+IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const {
     uint8_t Radix = 10;
 
     llvm::APInt Value(64, Literal, Radix);
     return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value, false));
 }
 
-UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) {
+UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) const {
     return Context.createExpression<UnaryOperator>(Loc, Kind, expr);
 }
 
-BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) {
+BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) const {
     return Context.createExpression<BinaryOperator>(Loc, Kind, left, right);
 }
 
-AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) {
+AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const {
     if (!avoid_errors) {
         if (left->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
             return nullptr;
         }
+        // TODO: Type checking - for now all variables are int
     }
 
     return Context.createExpression<AssignmentOperator>(Loc, left, right);
 }
 
-PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) {
+PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) const {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -642,7 +667,7 @@ PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKin
     return Context.createExpression<PrefixOperator>(Loc, Kind, expr);
 }
 
-PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) {
+PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) const {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -667,7 +692,7 @@ PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixO
  * @param Name Variable name to look up.
  * @return Pointer to Var node from the declaration, or nullptr if undeclared.
  */
-Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
+Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) const {
     // Look up the variable in current scope
     if (CurrentScope) {
         // We make a lookup by name, this lookup will traverse
@@ -689,7 +714,7 @@ Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
     return Context.createExpression<Var>(Loc, Name);
 }
 
-ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) {
+ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) const {
     return Context.createExpression<ConditionalExpr>(left, middle, right);
 }
 
@@ -704,9 +729,13 @@ ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Exp
  * @param args List of argument expressions.
  * @return Pointer to the created FunctionCallExpr node, or nullptr on error.
  */
-FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) {
+FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const {
     FunctionDeclaration *func = CurrentScope->lookupForFunction(name);
     if (func != nullptr) {
+        if (func->getArgs().size() != args.size() && !avoid_errors) {
+            Diags.report(Loc, diag::err_wrong_argument_call, name, args.size(), func->getArgs().size());
+            return nullptr;
+        }
         // Function found, use its name (original name)
         return Context.createExpression<FunctionCallExpr>(func->getName(), args);
     }
