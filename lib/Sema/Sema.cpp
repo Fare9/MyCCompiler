@@ -434,17 +434,32 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
     auto *parent_scope = CurrentScope->getParentScope();
     Scope *targetScope = (parent_scope == nullptr) ? CurrentScope : parent_scope;
 
+    if (targetScope->hasLinkageConflict(Name, Linkage::External)) {
+        if (!avoid_errors) {
+            Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
+            return nullptr;
+        }
+    }
     // Check if already declared in the target scope
     if (targetScope->hasSymbolInCurrentScope(Name)) {
+        // Function redeclaration - lookup existing function
+        FunctionDeclaration* existing = targetScope->lookupForFunction(Name);
+        if (existing) {
+            // Multiple declarations are allowed in C (e.g., forward declarations)
+            // TODO: Later, check type compatibility between declarations
+            // Return the EXISTING declaration so the body gets attached to the same object
+            return existing;
+        }
+        // Symbol exists but it's not a function (should have been caught by linkage check)
         if (!avoid_errors) {
             Diags.report(Loc, diag::erro_func_already_declared, Name.str());
             return nullptr;
         }
     }
 
-    // Insert into target scope
+    // First declaration - insert into target scope
     targetScope->addDeclaredIdentifier(Name);
-    targetScope->insert(func);
+    targetScope->insert(func, Linkage::External);
 
     return func;
 }
@@ -469,7 +484,7 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) {
         // For parameters, we create a minimal VarDeclaration just for scope tracking
         auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
 
-        if (!CurrentScope->insert(Name, decl)) {
+        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
             if (!avoid_errors) {
                 Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
                 return nullptr;
@@ -504,7 +519,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
         // We try to insert it, but another declaration exists
         // this is an error, in the same scope (block) two variables
         // cannot have the same name.
-        if (!CurrentScope->insert(Name, decl)) {
+        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
             if (!avoid_errors) {
                 Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
                 return true;

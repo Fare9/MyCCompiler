@@ -835,6 +835,10 @@ namespace mycc {
             body = std::move(s);
         }
 
+        [[nodiscard]] bool hasBody() const {
+            return !body.empty();
+        }
+
         void add_statement(Statement *s) {
             body.emplace_back(s);
         }

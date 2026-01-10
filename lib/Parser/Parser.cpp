@@ -116,6 +116,13 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
 
         if (consume(tok::r_brace))
             return _errorhandler();
+
+        // Check for multiple definitions (redefinition error)
+        if (F->hasBody()) {
+            getDiagnostics().report(funcLoc, diag::err_function_redefinition, funcName);
+            return _errorhandler();
+        }
+
         F->setBody(body);
     }
 
@@ -635,6 +642,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
 
     // Create a Function object with no body (declaration only)
     FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args);
+    if (!F)
+        return true;
 
     if (Tok.is(tok::semi)) {
         advance();
@@ -650,6 +659,13 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
             return true;
         if (consume(tok::r_brace))
             return true;
+
+        // Check for multiple definitions (redefinition error)
+        if (F->hasBody()) {
+            getDiagnostics().report(Loc, diag::err_function_redefinition, Name);
+            return true;
+        }
+
         F->setBody(body);
     }
 
