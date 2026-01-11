@@ -62,6 +62,17 @@ private:
 
     // Convert AST Expression to IR Value
     ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);
+
+    // Expression-specific generation methods
+    ir::Value* generateVarExpression(const Var& VarExpr, ir::Function* IRFunc);
+    ir::Value* generateAssignmentExpression(const AssignmentOperator& Assignment, ir::Function* IRFunc);
+    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc);
+    ir::Value* generateUnaryExpression(const UnaryOperator& UnaryOp, ir::Function* IRFunc);
+    ir::Value* generateBinaryExpression(const BinaryOperator& BinaryOp, ir::Function* IRFunc);
+    ir::Value* generatePrefixExpression(const PrefixOperator& PrefixOp, ir::Function* IRFunc);
+    ir::Value* generatePostfixExpression(const PostfixOperator& PostfixOp, ir::Function* IRFunc);
+    ir::Value* generateConditionalExpression(const ConditionalExpr& CondExpr, ir::Function* IRFunc);
+    ir::Value* generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc);
 };
 
 }
