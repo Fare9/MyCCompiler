@@ -27,7 +27,16 @@ bool Parser::parseProgram(Program *&P) {
         if (!parseFunction(Func)) {
             return false;
         }
-        Funcs.push_back(Func);
+        bool add_to_funcs = true;
+        for (auto *existing_func: Funcs) {
+            if (Func->getName() == existing_func->getName() &&
+                Func->getArgs().size() == existing_func->getArgs().size()) {
+                add_to_funcs = false;
+                break;
+            }
+        }
+        if (add_to_funcs)
+            Funcs.push_back(Func);
     }
 
     P = Actions.actOnProgramDeclaration(Funcs);
@@ -123,6 +132,8 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
             return _errorhandler();
         }
 
+        // Update args for the definition (parameter names from definition take precedence)
+        F->setArgs(args);
         F->setBody(body);
     }
 
@@ -666,6 +677,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
             return true;
         }
 
+        // Update args for the definition (parameter names from definition take precedence)
+        F->setArgs(args);
         F->setBody(body);
     }
 

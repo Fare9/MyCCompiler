@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <set>
 
 namespace mycc {
 namespace codegen {
@@ -13,6 +14,7 @@ namespace x64 {
 
 class X64CodeGenerator {
     std::unique_ptr<X64Program> Program;
+    std::set<std::string> ExternalFunctions;  // Functions without bodies
     
 public:
     X64CodeGenerator() = default;
@@ -43,12 +45,16 @@ private:
     void generateBinary(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
     void generateDiv(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
     void generateRem(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
+
+    // For generating calls
+    void generateCall(const ir::Invoke& InvokeInstr, X64Function* X64Func);
     
     // Operand conversion helpers
     X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);
     X64Register* convertRegister(const ir::Reg& Reg, X64Context& Ctx);
     X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
     X64Register* convertVariable(const ir::VarOp& Var, X64Context& Ctx);
+    X64Register* convertParameter(const ir::ParameterOp& Var, X64Context& Ctx);
     
     // Phase 2: Replace pseudo-registers with stack allocations
     void allocateStackSlots();

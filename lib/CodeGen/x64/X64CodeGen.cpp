@@ -40,13 +40,63 @@ void X64CodeGenerator::generateProgram(const ir::Program& IRProg) {
     Program = std::make_unique<X64Program>();
 
     for (const auto* IRFunc : IRProg) {
-        auto* X64Func = new X64Function(IRFunc->get_name());
+        // Skip external functions (functions without bodies)
+        if (IRFunc->empty()) {
+            ExternalFunctions.insert(IRFunc->get_name().str());
+            continue;
+        }
+
+        auto *X64Func = new X64Function(IRFunc->get_name());
         Program->add_function(X64Func);
         generateFunction(*IRFunc, X64Func);
     }
 }
 
 void X64CodeGenerator::generateFunction(const ir::Function& IRFunc, X64Function* X64Func) {
+    auto& Ctx = X64Func->getContext();
+
+    // Generate parameter moves at the start of the function
+    // Move parameters from calling convention registers/stack to their local storage
+    std::vector ParamRegs = {
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RDI, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RSI, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RDX, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::R8, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::R9, PhysicalRegister::Size::DWORD),
+    };
+
+    const auto& params = IRFunc.getArgs();
+
+    // Move the arguments from the registers/stack where it comes when starting
+    // the function, to the Operand destination, in this way we do not have to
+    // care about using a register later or something. We can fix this and optimize
+    // it in future optimization passes.
+
+    // Handle first 6 parameters (passed in registers)
+    for (size_t i = 0; i < params.size() && i < 6; i++) {
+        // Convert the parameter to its X64 operand (will be a pseudo register or variable)
+        X64Operand* paramDst = convertOperand(params[i], Ctx);
+        // Move from calling convention register to the parameter's location
+        X64Func->add_instruction(Ctx.createMov(ParamRegs[i], paramDst));
+    }
+
+    // Handle parameters 7+ (passed on the stack)
+    // Stack layout: [rbp] = old rbp, [rbp+8] = return address, [rbp+16] = 7th param, [rbp+24] = 8th param, etc.
+    PhysicalRegister* rbp = Ctx.getPhysReg(PhysicalRegister::PhysReg::RBP, PhysicalRegister::Size::QWORD);
+    for (size_t i = 6; i < params.size(); i++) {
+        // Calculate offset: 16 bytes (old rbp + return address) + (i-6) * 8 bytes per parameter
+        int64_t stackOffset = 16 + (i - 6) * 8;
+        X64Stack* paramSrc = Ctx.createStack(llvm::APSInt(llvm::APInt(64, stackOffset)), rbp, X64Stack::DWORD);
+
+        // Convert the parameter to its destination operand
+        X64Operand* paramDst = convertOperand(params[i], Ctx);
+
+        // Move from incoming stack location to the parameter's local storage
+        X64Func->add_instruction(Ctx.createMov(paramSrc, paramDst));
+    }
+
+    // Generate the rest of the function instructions
     for (const auto * Instr : IRFunc) {
         generateInstruction(*Instr, X64Func);
     }
@@ -92,6 +142,8 @@ void X64CodeGenerator::generateInstruction(const ir::Instruction& Inst, X64Funct
         generateJumpIfZero(*JZ, X64Func);
     } else if (const auto * Comp = dynamic_cast<const ir::ICmpOp*>(&Inst)) {
         generateComp(*Comp, X64Func);
+    } else if (const auto * Invoke = dynamic_cast<const ir::Invoke*>(&Inst)) {
+        generateCall(*Invoke, X64Func);
     }
 }
 
@@ -302,6 +354,98 @@ void X64CodeGenerator::generateRem(const ir::BinaryOp& BinaryInstr, X64Function*
     X64Func->add_instruction(Ctx.createMov(edx, dst));
 }
 
+
+
+void X64CodeGenerator::generateCall(const ir::Invoke& InvokeInstr, X64Function* X64Func) {
+    auto &Ctx = X64Func->getContext();
+
+    std::vector Regs = {
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RDI, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RSI, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RDX, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::RCX, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::R8, PhysicalRegister::Size::DWORD),
+        Ctx.getPhysReg(PhysicalRegister::PhysReg::R9, PhysicalRegister::Size::DWORD),
+    };
+
+    // In X86-64 the stack must be aligned to 16 bytes, we need to calculate
+    // how many arguments will go to the stack, and see if the stack will be
+    // aligned to 16 bytes. To know that we will see if the number of those
+    // operands is even or odd.
+
+    int stack_padding = 0;
+    size_t rest_of_operands = 0;
+    if (InvokeInstr.getNumOperands() > 6) {
+        rest_of_operands = InvokeInstr.getNumOperands() - 6;
+        if (rest_of_operands % 2 != 0) {
+            stack_padding = 8;
+        }
+    }
+
+    if (stack_padding > 0) {
+        llvm::APSInt stackPaddingAPSInt(llvm::APInt(32, stack_padding));
+        X64Func->add_instruction(Ctx.createAllocation(Ctx.createInt(stackPaddingAPSInt)));
+    }
+
+    // Move first 6 arguments to registers
+    for (size_t i = 0, e = InvokeInstr.getNumOperands() - rest_of_operands; i < e; i++) {
+        auto * arg = InvokeInstr.getOperand(i);
+        X64Operand * param = convertOperand(arg, Ctx);
+        X64Func->add_instruction(Ctx.createMov(param, Regs[i]));
+    }
+
+    // Push remaining arguments onto stack (in reverse order: last arg first)
+    for (int i = rest_of_operands - 1; i >= 0; i--) {
+        auto * arg = InvokeInstr.getOperand(6 + i);
+        X64Operand * param = convertOperand(arg, Ctx);
+
+        // Check if the operand is a physical register or immediate value
+        if (dynamic_cast<X64Int*>(param)) {
+            // Push directly
+            X64Func->add_instruction(Ctx.createPush(param));
+        }
+        else if (dynamic_cast<PhysicalRegister*>(param)) {
+            auto * physical_reg = dynamic_cast<PhysicalRegister*>(param);
+            if (physical_reg->getSize() != PhysicalRegister::Size::QWORD) {
+                auto *Reg_64bit = Ctx.getPhysReg(physical_reg->getReg(), PhysicalRegister::Size::QWORD);
+                X64Func->add_instruction(Ctx.createMov(physical_reg, Reg_64bit));
+                X64Func->add_instruction(Ctx.createPush(Reg_64bit));
+            } else {
+                // Already 64-bit, push directly
+                X64Func->add_instruction(Ctx.createPush(physical_reg));
+            }
+        } else {
+            // If it's memory (X64Stack) or a pseudo register (memory, PseudoRegister), move to EAX first, then push RAX
+            auto* EAX = Ctx.getPhysReg(PhysicalRegister::PhysReg::RAX, PhysicalRegister::Size::DWORD);
+            X64Func->add_instruction(Ctx.createMov(param, EAX));
+            auto* RAX = Ctx.getPhysReg(PhysicalRegister::PhysReg::RAX, PhysicalRegister::Size::QWORD);
+            X64Func->add_instruction(Ctx.createPush(RAX));
+        }
+    }
+
+    // Make the function call
+    // For external functions (no body), use @PLT for position-independent code
+    std::string callTarget = InvokeInstr.getCalledFunction().str();
+    if (ExternalFunctions.count(callTarget) > 0) {
+        callTarget += "@PLT";
+    }
+    X64Func->add_instruction(Ctx.createCall(callTarget));
+
+    // Deallocate stack space (arguments + padding)
+    int total_stack_bytes = rest_of_operands * 8 + stack_padding;
+    if (total_stack_bytes > 0) {
+        llvm::APSInt stackBytesAPSInt(llvm::APInt(32, total_stack_bytes));
+        X64Func->add_instruction(Ctx.createDeallocation(Ctx.createInt(stackBytesAPSInt)));
+    }
+
+    // If the function returns a value, move RAX to the result register
+    if (InvokeInstr.hasResult()) {
+        X64Operand * result = convertOperand(InvokeInstr.getResult(), Ctx);
+        X64Operand * rax = Ctx.getPhysReg(PhysicalRegister::PhysReg::RAX, PhysicalRegister::Size::DWORD);
+        X64Func->add_instruction(Ctx.createMov(rax, result));
+    }
+}
+
 // ===== Operand Conversion Helpers =====
 
 X64Operand* X64CodeGenerator::convertOperand(const ir::Value* Val, X64Context& Ctx) {
@@ -311,6 +455,8 @@ X64Operand* X64CodeGenerator::convertOperand(const ir::Value* Val, X64Context& C
         return convertRegister(*Reg, Ctx);
     if (const auto * Var = dynamic_cast<const ir::VarOp*>(Val))
         return convertVariable(*Var, Ctx);
+    if (const auto * Param = dynamic_cast<const ir::ParameterOp*>(Val))
+        return convertParameter(*Param, Ctx);
     return nullptr;
 }
 
@@ -325,6 +471,11 @@ X64Int* X64CodeGenerator::convertInteger(const ir::Int& IntVal, X64Context& Ctx)
 X64Register* X64CodeGenerator::convertVariable(const ir::VarOp& Var, X64Context& Ctx) {
     // Use variable name hash as pseudo register ID to ensure same variable 
     // gets same pseudo register across different uses
+    unsigned pseudoID = std::hash<std::string>{}(Var.getName());
+    return Ctx.getPseudoReg(pseudoID);
+}
+
+X64Register* X64CodeGenerator::convertParameter(const ir::ParameterOp& Var, X64Context& Ctx) {
     unsigned pseudoID = std::hash<std::string>{}(Var.getName());
     return Ctx.getPseudoReg(pseudoID);
 }
@@ -624,7 +775,10 @@ void X64CodeGenerator::insertAllocationInstruction(X64Function* Func) {
 
     if (stackSize == 0) return;
 
-    llvm::APSInt stackSizeAPSint(llvm::APInt(32, abs(stackSize)));
+    // Round up to the next multiple of 16 bytes for alignment
+    int roundedStackSize = ((abs(stackSize) + 15) / 16) * 16;
+
+    llvm::APSInt stackSizeAPSint(llvm::APInt(32, roundedStackSize));
     auto * stackSizeImm = Ctx.createInt(stackSizeAPSint);
     auto * allocateInsn = Ctx.createAllocation(stackSizeImm);
     Func->getInstructions().push_front(allocateInsn);

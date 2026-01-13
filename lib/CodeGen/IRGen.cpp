@@ -43,18 +43,20 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
 
     bool containsReturn = false;
 
-    for (const BlockItem &Item: ASTFunc) {
-        if (std::holds_alternative<VarDeclaration *>(Item)) {
-            VarDeclaration *Decl = std::get<VarDeclaration *>(Item);
-            funcDeclaredVars.push_back(Decl->getVar()->getName().str());
+    if (ASTFunc.hasBody()) {
+        for (const BlockItem &Item: ASTFunc) {
+            if (std::holds_alternative<VarDeclaration *>(Item)) {
+                VarDeclaration *Decl = std::get<VarDeclaration *>(Item);
+                funcDeclaredVars.push_back(Decl->getVar()->getName().str());
+            }
+            containsReturn |= generateBlockItem(Item, IRFunc);
         }
-        containsReturn |= generateBlockItem(Item, IRFunc);
-    }
 
-    if (!containsReturn) {
-        ir::Int *RetVal = Ctx.createInt(llvm::APSInt::get(0));
-        ir::Ret *RetInst = Ctx.createRet(RetVal);
-        IRFunc->add_instruction(RetInst);
+        if (!containsReturn) {
+            ir::Int *RetVal = Ctx.createInt(llvm::APSInt::get(0));
+            ir::Ret *RetInst = Ctx.createRet(RetVal);
+            IRFunc->add_instruction(RetInst);
+        }
     }
 
     exitScope(funcDeclaredVars);

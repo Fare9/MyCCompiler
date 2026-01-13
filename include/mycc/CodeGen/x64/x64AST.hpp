@@ -5,11 +5,11 @@
 #include "llvm/ADT/APSInt.h"
 
 #include <deque>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 #include <sstream>
 
-#include "x64AST.hpp"
 #include "x64AST.hpp"
 
 namespace mycc {
@@ -653,6 +653,74 @@ public:
     }
 };
 
+class X64Deallocate : public X64Instruction {
+    X64Operand * deAllocationRegister;
+    X64Operand * Offset;
+public:
+    X64Deallocate() = default;
+
+    X64Deallocate(X64Operand * deAllocationRegister, X64Operand * Offset) :
+        deAllocationRegister(deAllocationRegister), Offset(Offset) {}
+
+    void setDeAllocationRegister(X64Operand * Reg) {
+        deAllocationRegister = Reg;
+    }
+
+    void setOffset(X64Operand * O) {
+        Offset = O;
+    }
+
+    [[nodiscard]] X64Operand * getDeAllocationRegister() const {
+        return deAllocationRegister;
+    }
+
+    [[nodiscard]] X64Operand * getOffset() const {
+        return Offset;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "add " + deAllocationRegister->to_string() + ", " + Offset->to_string();
+    }
+};
+
+class X64Push : public X64Instruction {
+    X64Operand * pushOp;
+public:
+    X64Push() = default;
+    X64Push(X64Operand * pushOp) : pushOp(pushOp) {}
+
+    void setPushOp(X64Operand * Op) {
+        pushOp = Op;
+    }
+
+    [[nodiscard]] X64Operand * getPushOp() const {
+        return pushOp;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "push " + pushOp->to_string();
+    }
+};
+
+class X64Call : public X64Instruction {
+    std::string functionName;
+public:
+    X64Call() = default;
+    X64Call(std::string functionName) : functionName(std::move(functionName)) {}
+
+    void setFunctionName(const std::string &functionName) {
+        this->functionName = functionName;
+    }
+
+    [[nodiscard]] StringRef getFunctionName() const {
+        return functionName;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "call " + functionName;
+    }
+};
+
 class X64Context {
     // Memory management - owns all operands and instructions
     std::vector<std::unique_ptr<X64Operand>> Operands;
@@ -691,16 +759,9 @@ public:
     }
     
     PhysicalRegister* getPhysReg(PhysicalRegister::PhysReg physReg, PhysicalRegister::Size size = PhysicalRegister::QWORD) {
-        auto it = PhysRegs.find(physReg);
-        if (it != PhysRegs.end()) {
-            // Update size if different
-            it->second->setSize(size);
-            return it->second;
-        }
-        
+        // Don't cache - always create a new register to avoid mutating existing instructions
         auto* reg = new PhysicalRegister(physReg, size);
         Operands.emplace_back(reg);
-        PhysRegs[physReg] = reg;
         return reg;
     }
     
@@ -869,6 +930,25 @@ public:
     X64Allocate* createAllocation(X64Operand * Offset) {
         auto * RSP = getPhysReg(PhysicalRegister::PhysReg::RSP, PhysicalRegister::Size::QWORD);
         auto * inst = new X64Allocate(RSP, Offset);
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
+    X64Deallocate* createDeallocation(X64Operand * Offset) {
+        auto * RSP = getPhysReg(PhysicalRegister::PhysReg::RSP, PhysicalRegister::Size::QWORD);
+        auto * inst = new X64Deallocate(RSP, Offset);
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
+    X64Push* createPush(X64Operand * Op) {
+        auto * inst = new X64Push(Op);
+        Instructions.emplace_back(inst);
+        return inst;
+    }
+
+    X64Call* createCall(std::string functionName) {
+        auto * inst = new X64Call(functionName);
         Instructions.emplace_back(inst);
         return inst;
     }

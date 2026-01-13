@@ -819,6 +819,7 @@ namespace mycc {
         SMLoc Loc;
         StringRef Name;
         ArgsList args;
+        bool IsDefinition = false;  // True if function has a body (even if empty)
         BlockItems body;
 
     public:
@@ -833,10 +834,19 @@ namespace mycc {
 
         void setBody(BlockItems &s) {
             body = std::move(s);
+            IsDefinition = true;  // Mark as definition when body is set
+        }
+
+        void setArgs(ArgsList &newArgs) {
+            args = std::move(newArgs);
         }
 
         [[nodiscard]] bool hasBody() const {
-            return !body.empty();
+            return IsDefinition;
+        }
+
+        [[nodiscard]] bool isDeclaration() const {
+            return !IsDefinition;
         }
 
         void add_statement(Statement *s) {
