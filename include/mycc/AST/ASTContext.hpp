@@ -12,8 +12,8 @@ namespace mycc {
 // Forward declarations
 class Statement;
 class Expr;
-class Declaration;
-class Function;
+class VarDeclaration;
+class FunctionDeclaration;
 class Program;
 
 class ASTContext {
@@ -24,8 +24,8 @@ class ASTContext {
     // Using deque to ensure pointer stability (no reallocation)
     std::deque<std::unique_ptr<Statement>> Statements;
     std::deque<std::unique_ptr<Expr>> Expressions;
-    std::deque<std::unique_ptr<Declaration>> Declarations;
-    std::deque<std::unique_ptr<Function>> Functions;
+    std::deque<std::unique_ptr<VarDeclaration>> Declarations;
+    std::deque<std::unique_ptr<FunctionDeclaration>> Functions;
     std::deque<std::unique_ptr<Program>> Programs;
     
 public:

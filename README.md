@@ -125,4 +125,4 @@ The compiler currently supports:
   - Declaration placement validation (labels must precede statements, not declarations)
 - x86-64 assembly generation with Intel syntax
 
-For detailed technical information about the compiler's architecture and implementation, see [TECHNICAL.md](TECHNICAL.md).
+For detailed technical information about the compiler's architecture and implementation, see [TECHNICAL.md](Documentation/TECHNICAL.md).

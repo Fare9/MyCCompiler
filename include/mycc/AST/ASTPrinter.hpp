@@ -8,18 +8,18 @@ namespace mycc {
 class ASTPrinter {
 public:
     static std::string print(const Program* program);
-    static std::string print(const Function* function);
+    static std::string print(const FunctionDeclaration* function);
     static std::string print(const Statement* statement);
     static std::string print(const Expr* expr);
 
 private:
     static std::string print(const Program* program, int indent);
-    static std::string print(const Function* function, int indent);
+    static std::string print(const FunctionDeclaration* function, int indent);
     static std::string print(const Statement* statement, int indent);
     static std::string print(const Expr* expr, int indent);
     
-    static std::string print(const Declaration* decl);
-    static std::string print(const Declaration* decl, int indent);
+    static std::string print(const VarDeclaration* decl);
+    static std::string print(const VarDeclaration* decl, int indent);
 
     static std::string printReturnStatement(const ReturnStatement* stmt, int indent);
     static std::string printExpressionStatement(const ExpressionStatement* stmt, int indent);
@@ -44,7 +44,8 @@ private:
     static std::string printPrefixOperator(const PrefixOperator* expr, int indent);
     static std::string printPostfixOperator(const PostfixOperator* expr, int indent);
     static std::string printConditionalExpr(const ConditionalExpr* expr, int indent);
-    static std::string printDeclaration(const Declaration* decl, int indent);
+    static std::string printFunctionCallExpr(const FunctionCallExpr* expr, int indent);
+    static std::string printDeclaration(const VarDeclaration* decl, int indent);
     
     static std::string getIndent(int level);
 };

@@ -94,10 +94,10 @@ class Parser {
     /// @param P program to parse
     /// @return `true` if parsing was well, `false` otherwise
     bool parseProgram(Program *&P);
-    bool parseFunction(Function *&F);
+    bool parseFunction(FunctionDeclaration *&F);
 
     bool parseBlock(BlockItems& Items);
-    bool parseDeclaration(BlockItems& Items);
+    bool parseVarDeclaration(BlockItems& Items);
     bool parseStatement(BlockItems& Items);
     bool parseReturnStmt(BlockItems& Items);
     bool parseExprStmt(BlockItems& Items);
@@ -111,6 +111,9 @@ class Parser {
     bool parseDefaultStatement(BlockItems& Items);
     bool parseCaseStatement(BlockItems& Items);
     bool parseSwitchStatement(BlockItems& Items);
+
+    bool parseFunctionDeclarationStmt(BlockItems& Items, SMLoc Loc, StringRef Name);
+    bool parseVariableDeclInline(BlockItems& Items, SMLoc Loc, StringRef Name);
 
     bool parseExpr(Expr *&E, int min_precedence = 0);
     bool parseMiddle(Expr *&Middle);

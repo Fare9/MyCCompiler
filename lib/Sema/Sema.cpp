@@ -4,11 +4,23 @@
 
 using namespace mycc;
 
+/**
+ * @brief Enter a new function scope by clearing function-level label tracking.
+ *
+ * This method resets the FunctionLabels and GotoLabels sets to prepare
+ * for semantic analysis of a new function.
+ */
 void Sema::enterFunction() {
     FunctionLabels.clear();
     GotoLabels.clear();
 }
 
+/**
+ * @brief Exit function scope and validate that all goto labels are defined.
+ *
+ * After processing a function, this validates that every goto statement
+ * references a label that was actually defined in the function.
+ */
 void Sema::exitFunction() {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
@@ -16,7 +28,7 @@ void Sema::exitFunction() {
     }
 }
 
-void Sema::checkGotoLabelsCorrectlyPointToFunction() {
+void Sema::checkGotoLabelsCorrectlyPointToFunction() const {
     for (const auto &label: GotoLabels) {
         if (!FunctionLabels.contains(label)) {
             Diags.report(SMLoc(), diag::err_undefined_label, label.str());
@@ -33,9 +45,6 @@ void Sema::exitScope() {
     // check first there's a current scope
     assert(CurrentScope && "Can't exit non-existing scope");
 
-    // Pop variables that were declared in this scope
-    popVariablesFromScope(CurrentScope->getDeclaredVariables());
-
     Scope *Parent = CurrentScope->getParentScope();
     // delete current scope
     delete CurrentScope;
@@ -46,7 +55,17 @@ std::string Sema::generateLoopLabel() {
     return "loop_" + std::to_string(LoopLabelCounter++);
 }
 
-void Sema::assignLoopLabels(Function &F) {
+/**
+ * @brief Assign unique labels to all loops, breaks, and continues in a function.
+ *
+ * This method traverses the function body and assigns labels to:
+ * - Loop statements (while, do-while, for) for break and continue targets
+ * - Switch statements for break targets
+ * - Break and continue statements to reference their appropriate targets
+ *
+ * @param F The function to process.
+ */
+void Sema::assignLoopLabels(FunctionDeclaration &F) {
     // Labels for the breaks
     std::vector<BreakableContext> breakableStack;
 
@@ -86,6 +105,19 @@ int64_t Sema::evaluateConstantExpression(Expr *expr) {
     return 0;
 }
 
+/**
+ * @brief Validate the body of a switch statement recursively.
+ *
+ * Performs the following validations:
+ * 1. Case values must be constant expressions
+ * 2. No duplicate case values
+ * 3. At most one default case
+ * 4. No variable declarations immediately after case/default labels
+ *
+ * @param body Switch body statement to validate.
+ * @param seenCaseValues Set to track and detect duplicate case values.
+ * @param hasDefault Flag indicating if a default case has been seen.
+ */
 void Sema::validateSwitchBody(Statement *body,
                               std::set<int64_t> &seenCaseValues,
                               bool &hasDefault) {
@@ -129,7 +161,7 @@ void Sema::validateSwitchBody(Statement *body,
             // Go over each item to validate the body
             for (auto &item: *compound) {
                 // Check if current item is a Declaration following case/default
-                if (std::holds_alternative<Declaration *>(item)) {
+                if (std::holds_alternative<VarDeclaration *>(item)) {
                     if (prevStmt &&
                         (prevStmt->getKind() == Statement::SK_Case ||
                          prevStmt->getKind() == Statement::SK_Default)) {
@@ -176,6 +208,19 @@ void Sema::validateSwitchBody(Statement *body,
     }
 }
 
+/**
+ * @brief Recursively traverse a statement and assign labels for control flow.
+ *
+ * This method handles:
+ * - Loops (while, do-while, for): assigns base labels and processes break/continue
+ * - Switch statements: assigns break label and validates cases
+ * - Break statements: links to innermost breakable context
+ * - Continue statements: links to innermost loop context
+ * - Compound and conditional statements: recursively processes children
+ *
+ * @param stmt Statement to traverse.
+ * @param breakableStack Stack of enclosing breakable contexts for break/continue resolution.
+ */
 void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &breakableStack) {
     if (!stmt) return;
 
@@ -373,68 +418,161 @@ void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &bre
 
 void Sema::initialize() {
     CurrentScope = nullptr;
-    VariableCounter = 0;
 }
 
-Program *Sema::actOnProgramDeclaration(FuncList &Funcs) {
+Program *Sema::actOnProgramDeclaration(FuncList &Funcs) const {
     auto *p = Context.createProgram<Program>();
     p->add_functions(Funcs);
     return p;
 }
 
-Function *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name) {
-    auto *func = Context.createFunction<Function>(Name, Loc);
+FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const {
+    auto *func = Context.createFunction<FunctionDeclaration>(Name, Loc, args);
+
+    // Function declarations always go into the global/file scope
+    // Even if declared inside a block, they have external linkage
+    // Loop up to find the global scope (the one with no parent)
+    Scope *globalScope = CurrentScope;
+    while (globalScope->getParentScope() != nullptr) {
+        globalScope = globalScope->getParentScope();
+    }
+    Scope *parentScope = CurrentScope->getParentScope();
+
+
+    if (parentScope && parentScope->hasLinkageConflict(Name, Linkage::External)) {
+        if (!avoid_errors) {
+            Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
+            return nullptr;
+        }
+    }
+    // Check if already declared in the target scope
+    if (globalScope->hasSymbolInCurrentScope(Name)) {
+        // Function redeclaration - lookup existing function
+        FunctionDeclaration *existing = globalScope->lookupForFunction(Name);
+        if (existing) {
+            // We check now the number of parameters
+            if (existing->getArgs().size() != args.size() && !avoid_errors) {
+                Diags.report(Loc, diag::err_wrong_argument_count, Name, existing->getArgs().size(), args.size());
+                return nullptr;
+            }
+
+            // Multiple declarations are allowed in C (e.g., forward declarations)
+            // TODO: Later, check type compatibility between declarations
+            // Return the EXISTING declaration so the body gets attached to the same object
+            return existing;
+        }
+        // Symbol exists but it's not a function (should have been caught by linkage check)
+        if (!avoid_errors) {
+            Diags.report(Loc, diag::erro_func_already_declared, Name.str());
+            return nullptr;
+        }
+    }
+
+    // First declaration - insert into target scope
+    globalScope->addDeclaredIdentifier(Name);
+    globalScope->insert(func, Linkage::External);
+    if (parentScope && globalScope != parentScope) {
+        parentScope->insert(func, Linkage::External);
+    }
 
     return func;
 }
 
-bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) {
-    // Generate unique name and track it
-    StringRef originalName = Name;
-    std::string uniqueName = generateUniqueVarName(originalName);
-    pushVariableName(originalName, uniqueName);
+/**
+ * @brief Process a function parameter declaration.
+ *
+ * Creates the parameter with its original name, adds it to the current scope,
+ * and tracks it for variable name resolution. Reports an error if a
+ * parameter with the same name already exists in the current scope.
+ *
+ * @param Loc Source location of the parameter declaration.
+ * @param Name Parameter name.
+ * @return Pointer to created Var node, or nullptr on error.
+ */
+Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
+    // Create Var with original name (no renaming)
+    auto *var = Context.createExpression<Var>(Loc, Name);
 
-    // Create declaration with unique name
-    auto *var = Context.createExpression<Var>(Loc, uniqueName);
-    auto *decl = Context.createDeclaration<Declaration>(Loc, var);
-
-    // Add to current scope if it exists, using original name as key
+    // Add to current scope if it exists (parameters are in function scope)
     if (CurrentScope) {
+        // For parameters, we create a minimal VarDeclaration just for scope tracking
+        auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
+
+        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
+                return nullptr;
+            }
+        }
+
+        CurrentScope->addDeclaredIdentifier(Name);
+    }
+
+    return var;
+}
+
+/**
+ * @brief Process a variable declaration and add it to the current scope.
+ *
+ * Creates the variable with its original name, adds it to the current scope,
+ * and appends the declaration to the block items. Reports an error if
+ * a variable with the same name already exists in the current scope.
+ *
+ * @param Items Block items list to append the declaration to.
+ * @param Loc Source location of the variable declaration.
+ * @param Name Variable name.
+ * @return true if a duplicate declaration error occurred, false on success.
+ */
+bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const {
+    // Create declaration with original name (no renaming)
+    auto *var = Context.createExpression<Var>(Loc, Name);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
+
+
+    // Add to current scope if it exists
+    if (CurrentScope) {
+        // Check if there's already a symbol with a different linkage, to show a different error.
+        if (CurrentScope->hasLinkageConflict(Name, Linkage::None)) {
+            if (!avoid_errors) {
+                Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
+                return true;
+            }
+        }
         // We try to insert it, but another declaration exists
         // this is an error, in the same scope (block) two variables
         // cannot have the same name.
-        if (!CurrentScope->insert(originalName, decl)) {
+        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
             if (!avoid_errors) {
-                Diags.report(Loc, diag::err_duplicate_variable_declaration, originalName.str());
+                Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
                 return true;
             }
         }
 
         // Track that this variable was declared in the current scope
-        CurrentScope->addDeclaredVariable(originalName);
+        CurrentScope->addDeclaredIdentifier(Name);
     }
 
     Items.emplace_back(decl);
     return false;
 }
 
-void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) {
+void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const {
     Items.emplace_back(Context.createStatement<ReturnStatement>(RetVal));
 }
 
-void Sema::actOnNullStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnNullStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<NullStatement>());
 }
 
-void Sema::actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) {
+void Sema::actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) const {
     Items.emplace_back(Context.createStatement<ExpressionStatement>(Expr));
 }
 
-void Sema::actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) {
+void Sema::actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) const {
     Items.emplace_back(Context.createStatement<IfStatement>(Cond, then_st, else_st));
 }
 
-void Sema::actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) {
+void Sema::actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) const {
     Items.emplace_back(Context.createStatement<CompoundStatement>(compoundStatement));
 }
 
@@ -457,65 +595,67 @@ void Sema::actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
     Items.emplace_back(Context.createStatement<GotoStatement>(Label));
 }
 
-void Sema::actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+void Sema::actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const {
     Items.emplace_back(Context.createStatement<WhileStatement>(Cond, Body));
 }
 
-void Sema::actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) {
+void Sema::actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) const {
     Items.emplace_back(Context.createStatement<DoWhileStatement>(Body, Cond));
 }
 
-void Sema::actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body) {
+void Sema::actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post,
+                             Statement *Body) const {
     Items.emplace_back(Context.createStatement<ForStatement>(Init, Cond, Post, Body));
 }
 
-void Sema::actOnBreakStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnBreakStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<BreakStatement>());
 }
 
-void Sema::actOnContinueStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnContinueStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<ContinueStatement>());
 }
 
-void Sema::actOnDefaultStatement(BlockItems &Items, SMLoc Loc) {
+void Sema::actOnDefaultStatement(BlockItems &Items, SMLoc Loc) const {
     Items.emplace_back(Context.createStatement<DefaultStatement>());
 }
 
-void Sema::actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) {
+void Sema::actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) const {
     Items.emplace_back(Context.createStatement<CaseStatement>(Cond));
 }
 
-void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) {
+void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const {
     Items.emplace_back(Context.createStatement<SwitchStatement>(Cond, Body));
 }
 
-IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
+IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const {
     uint8_t Radix = 10;
 
     llvm::APInt Value(64, Literal, Radix);
     return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value, false));
 }
 
-UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) {
+UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) const {
     return Context.createExpression<UnaryOperator>(Loc, Kind, expr);
 }
 
-BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) {
+BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) const {
     return Context.createExpression<BinaryOperator>(Loc, Kind, left, right);
 }
 
-AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) {
+AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const {
     if (!avoid_errors) {
         if (left->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
             return nullptr;
         }
+        // TODO: Type checking - for now all variables are int
     }
 
     return Context.createExpression<AssignmentOperator>(Loc, left, right);
 }
 
-PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) {
+PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) const {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -526,7 +666,7 @@ PrefixOperator *Sema::actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKin
     return Context.createExpression<PrefixOperator>(Loc, Kind, expr);
 }
 
-PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) {
+PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) const {
     if (!avoid_errors) {
         if (expr->getKind() != Expr::Ek_Var) {
             Diags.report(Loc, diag::err_incorrect_lvalue);
@@ -537,13 +677,27 @@ PostfixOperator *Sema::actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixO
     return Context.createExpression<PostfixOperator>(Loc, Kind, expr);
 }
 
-Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
+/**
+ * @brief Resolve an identifier to a variable.
+ *
+ * Performs variable name lookup through the scope chain. If the variable
+ * is found in an enclosing scope, returns the Var from its declaration.
+ * Reports an error if the variable is used before being declared.
+ *
+ * This method implements variable name shadowing by using the most recent
+ * (innermost scope) declaration of a variable.
+ *
+ * @param Loc Source location of the identifier.
+ * @param Name Variable name to look up.
+ * @return Pointer to Var node from the declaration, or nullptr if undeclared.
+ */
+Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) const {
     // Look up the variable in current scope
     if (CurrentScope) {
         // We make a lookup by name, this lookup will traverse
         // all the scopes from current through parents looking
-        /// for the variable.
-        Declaration *decl = CurrentScope->lookup(Name);
+        // for the variable.
+        VarDeclaration *decl = CurrentScope->lookupForVar(Name);
         if (!decl) {
             if (!avoid_errors) {
                 // Issue error for potentially undefined variable
@@ -551,48 +705,43 @@ Var *Sema::actOnIdentifier(SMLoc Loc, StringRef Name) {
                 return nullptr;
             }
         } else {
-            // Variable exists, get the unique name for it
-            std::string uniqueName = getCurrentUniqueVarName(Name);
-            return Context.createExpression<Var>(Loc, uniqueName);
+            // Variable exists, return the Var from the declaration
+            return decl->getVar();
         }
     }
 
     return Context.createExpression<Var>(Loc, Name);
 }
 
-ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) {
+ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Expr *right) const {
     return Context.createExpression<ConditionalExpr>(left, middle, right);
 }
 
-std::string Sema::generateUniqueVarName(StringRef originalName) {
-    return originalName.str() + "_" + std::to_string(VariableCounter++);
-}
-
-void Sema::pushVariableName(StringRef originalName, const std::string &uniqueName) {
-    // We keep unique names instead of the original ones
-    // it will be easier for later generating the intermmediate
-    // representation
-    VariableNameStacks[originalName].push_back(uniqueName);
-}
-
-std::string Sema::getCurrentUniqueVarName(StringRef originalName) {
-    // Look in the map of variable names, look for the last one.
-    auto it = VariableNameStacks.find(originalName);
-    if (it != VariableNameStacks.end() && !it->second.empty()) {
-        return it->second.back();
-    }
-    return originalName.str();
-}
-
-void Sema::popVariablesFromScope(const std::vector<std::string> &declaredVars) {
-    // Once we go out from a scope (a block), we have to
-    // remove all the declared variables from the variable
-    // name stacks, so we do not keep the unique generated
-    // names.
-    for (const std::string &varName: declaredVars) {
-        auto it = VariableNameStacks.find(varName);
-        if (it != VariableNameStacks.end() && !it->second.empty()) {
-            it->second.pop_back();
+/**
+ * @brief Create a function call expression with proper name resolution.
+ *
+ * Looks up the function name in scope. If found, uses the original function name.
+ * Reports an error if the function hasn't been declared.
+ *
+ * @param Loc Source location of the function call.
+ * @param name Function name to look up.
+ * @param args List of argument expressions.
+ * @return Pointer to the created FunctionCallExpr node, or nullptr on error.
+ */
+FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const {
+    FunctionDeclaration *func = CurrentScope->lookupForFunction(name);
+    if (func != nullptr) {
+        if (func->getArgs().size() != args.size() && !avoid_errors) {
+            Diags.report(Loc, diag::err_wrong_argument_call, name, args.size(), func->getArgs().size());
+            return nullptr;
         }
+        // Function found, use its name (original name)
+        return Context.createExpression<FunctionCallExpr>(func->getName(), args);
     }
+    if (!avoid_errors) {
+        // Issue error for potentially undefined function
+        Diags.report(Loc, diag::err_func_used_before_declared, name.str());
+        return nullptr;
+    }
+    return Context.createExpression<FunctionCallExpr>(name, args);
 }
