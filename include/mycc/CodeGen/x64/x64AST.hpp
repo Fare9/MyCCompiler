@@ -12,9 +12,9 @@
 
 #include "x64AST.hpp"
 
-namespace mycc {
-namespace codegen {
-namespace x64 {
+
+
+namespace mycc::codegen::x64 {
 
 enum class X64ConditionTypeE {
     E,  // Equal
@@ -575,6 +575,8 @@ public:
             case Sar:
                 opcode = "sar";
                 break;
+            default:
+                break;
         }
         return opcode + " "
             + dst->to_string() +", "
@@ -585,8 +587,6 @@ public:
 class X64IDiv : public X64Instruction {
     X64Operand * Op;
 public:
-    X64IDiv() = default;
-
     X64IDiv(X64Operand * Op) :
         Op(Op) {
     }
@@ -1076,5 +1076,5 @@ public:
 };
 
 }
-}
-}
+
+

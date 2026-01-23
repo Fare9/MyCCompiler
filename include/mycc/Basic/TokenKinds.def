@@ -87,6 +87,8 @@ KEYWORD(do, KEYALL)             // For loops in Chapter 8
 KEYWORD(switch, KEYALL)         // For switch from Chapter 8
 KEYWORD(case, KEYALL)           // For switch from Chapter 8
 KEYWORD(default, KEYALL)        // For switch from Chapter 8
+KEYWORD(static, KEYALL)         // For linkage options from Chapter 10
+KEYWORD(extern, KEYALL)         // For linkage options from Chapter 10
 
 #undef KEYWORD
 #undef PUNCTUATOR

@@ -46,7 +46,7 @@ namespace mycc {
         /**
          * @brief We keep this structure to maintain the context for the break instructions.
          * with the `base_level` we generate the break and the continue label. We also
-         * keep metadata to know if we are inside of a loop.
+         * keep metadata to know if we are inside a loop.
          */
         struct BreakableContext {
             std::string base_label;
@@ -148,7 +148,7 @@ namespace mycc {
          * @param Diags Diagnostics engine for error reporting.
          * @param Context AST context for creating AST nodes.
          */
-        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context) {
+        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context), CurrentScope(nullptr) {
             initialize();
         }
 
@@ -159,7 +159,7 @@ namespace mycc {
             avoid_errors = true;
         }
 
-        bool is_avoid_errors_active() {
+        [[nodiscard]] bool is_avoid_errors_active() const {
             return avoid_errors;
         }
 
@@ -176,7 +176,7 @@ namespace mycc {
         /**
          * @brief Exit function scope and validate goto labels.
          */
-        void exitFunction();
+        void exitFunction() const;
 
         /**
          * @brief Enter a new lexical scope for variable declarations.
@@ -216,7 +216,7 @@ namespace mycc {
          * @param Name Parameter name.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Process a variable declaration and add it to the current scope.
@@ -358,7 +358,7 @@ namespace mycc {
          * @param Literal String representation of the integer.
          * @return Pointer to the created IntegerLiteral node.
          */
-        IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
+        [[nodiscard]] IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -412,7 +412,7 @@ namespace mycc {
          * @param Name Variable name to look up.
          * @return Pointer to Var node with the unique name, or nullptr if undeclared.
          */
-        Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Create a conditional (ternary) expression.

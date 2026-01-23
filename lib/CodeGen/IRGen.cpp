@@ -342,7 +342,7 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
 
     // Different to While and DoWhile, in For we need
     // to set the label_continue, right before the
-    // post processing in the update of the variables.
+    // post-processing in the update of the variables.
     IRFunc->add_instruction(label_continue);
 
     // Generate update of the variables
@@ -412,13 +412,13 @@ void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc
     IRFunc->add_instruction(label_end);
 }
 
-void IRGenerator::generateCaseStmt(const Statement &Stmt, ir::Function *IRFunc) {
+void IRGenerator::generateCaseStmt(const Statement &Stmt, ir::Function *IRFunc) const {
     auto &caseStmt = dynamic_cast<const CaseStatement &>(Stmt);
     std::string caseLabel = std::string(caseStmt.get_label());
     IRFunc->add_instruction(Ctx.getOrCreateLabel(caseLabel, true));
 }
 
-void IRGenerator::generateDefaultStmt(const Statement &Stmt, ir::Function *IRFunc) {
+void IRGenerator::generateDefaultStmt(const Statement &Stmt, ir::Function *IRFunc) const {
     auto &defaultStmt = dynamic_cast<const DefaultStatement &>(Stmt);
     std::string defaultLabel = std::string(defaultStmt.get_label());
     IRFunc->add_instruction(Ctx.getOrCreateLabel(defaultLabel, true));
@@ -466,7 +466,7 @@ ir::Value *IRGenerator::generateAssignmentExpression(const AssignmentOperator &a
     return varop;
 }
 
-ir::Value *IRGenerator::generateIntExpression(const IntegerLiteral &IntLit, ir::Function *IRFunc) {
+ir::Value *IRGenerator::generateIntExpression(const IntegerLiteral &IntLit, ir::Function *IRFunc) const {
     // Create integer constant in IR
     return Ctx.createInt(IntLit.getValue());
 }
@@ -547,7 +547,9 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
         case BinaryOperator::Bok_And:
         case BinaryOperator::Bok_Or:
         case BinaryOperator::BoK_None:
+        default:
             break;
+
     }
     // According to C standard the subexpressions of the same operation
     // are usually unsequenced, they can be evaluated in any order.

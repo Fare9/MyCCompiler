@@ -57,8 +57,8 @@ private:
     void generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateForStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc);
-    void generateCaseStmt(const Statement& Stmt, ir::Function* IRFunc);
-    void generateDefaultStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateCaseStmt(const Statement& Stmt, ir::Function* IRFunc) const;
+    void generateDefaultStmt(const Statement& Stmt, ir::Function* IRFunc) const;
 
     // Convert AST Expression to IR Value
     ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);
@@ -66,7 +66,7 @@ private:
     // Expression-specific generation methods
     ir::Value* generateVarExpression(const Var& VarExpr, ir::Function* IRFunc);
     ir::Value* generateAssignmentExpression(const AssignmentOperator& Assignment, ir::Function* IRFunc);
-    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc);
+    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc) const;
     ir::Value* generateUnaryExpression(const UnaryOperator& UnaryOp, ir::Function* IRFunc);
     ir::Value* generateBinaryExpression(const BinaryOperator& BinaryOp, ir::Function* IRFunc);
     ir::Value* generatePrefixExpression(const PrefixOperator& PrefixOp, ir::Function* IRFunc);

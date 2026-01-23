@@ -21,7 +21,7 @@ void Sema::enterFunction() {
  * After processing a function, this validates that every goto statement
  * references a label that was actually defined in the function.
  */
-void Sema::exitFunction() {
+void Sema::exitFunction() const {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
         checkGotoLabelsCorrectlyPointToFunction();
@@ -55,6 +55,18 @@ std::string Sema::generateLoopLabel() {
     return "loop_" + std::to_string(LoopLabelCounter++);
 }
 
+std::string Sema::generateSwitchLabel() {
+    return "switch_" + std::to_string(SwitchLabelCounter++);
+}
+
+std::string Sema::generateCaseLabel() {
+    return "case_" + std::to_string(CaseLabelCounter++);
+}
+
+std::string Sema::generateDefaultLabel() {
+    return "default_" + std::to_string(DefaultLabelCounter++);
+}
+
 /**
  * @brief Assign unique labels to all loops, breaks, and continues in a function.
  *
@@ -75,136 +87,16 @@ void Sema::assignLoopLabels(FunctionDeclaration &F) {
     }
 }
 
+/**
+ * @brief From what a block item can be, just analyze those that are statements, this analysis
+ * is used to assign loop labels.
+ *
+ * @param item a block item reference, only handle those that are statements.
+ * @param breakableStack vector containing all the break statements information.
+ */
 void Sema::traverseBlockItem(BlockItem &item, std::vector<BreakableContext> &breakableStack) {
     if (std::holds_alternative<Statement *>(item)) {
         traverseStatement(std::get<Statement *>(item), breakableStack);
-    }
-}
-
-std::string Sema::generateSwitchLabel() {
-    return "switch_" + std::to_string(SwitchLabelCounter++);
-}
-
-std::string Sema::generateCaseLabel() {
-    return "case_" + std::to_string(CaseLabelCounter++);
-}
-
-std::string Sema::generateDefaultLabel() {
-    return "default_" + std::to_string(DefaultLabelCounter++);
-}
-
-bool Sema::isConstantExpression(Expr *expr) {
-    return expr->getKind() == Expr::Ek_Int;
-}
-
-int64_t Sema::evaluateConstantExpression(Expr *expr) {
-    if (auto *intLit = dynamic_cast<IntegerLiteral *>(expr)) {
-        return intLit->getValue().getSExtValue();
-    }
-    // this should never be reached since we only allow constant integers
-    return 0;
-}
-
-/**
- * @brief Validate the body of a switch statement recursively.
- *
- * Performs the following validations:
- * 1. Case values must be constant expressions
- * 2. No duplicate case values
- * 3. At most one default case
- * 4. No variable declarations immediately after case/default labels
- *
- * @param body Switch body statement to validate.
- * @param seenCaseValues Set to track and detect duplicate case values.
- * @param hasDefault Flag indicating if a default case has been seen.
- */
-void Sema::validateSwitchBody(Statement *body,
-                              std::set<int64_t> &seenCaseValues,
-                              bool &hasDefault) {
-    if (!body) return;
-
-    switch (body->getKind()) {
-        case Statement::SK_Case: {
-            auto *caseStmt = dynamic_cast<CaseStatement *>(body);
-
-            // First check, case value must be a constant integer
-            Expr *value = caseStmt->getValue();
-            if (!isConstantExpression(value)) {
-                Diags.report(SMLoc(), diag::err_case_value_not_constant);
-                exit(1);
-            }
-
-            // Second check, look for duplicated cases
-            int64_t caseValue = evaluateConstantExpression(value);
-            if (seenCaseValues.contains(caseValue)) {
-                Diags.report(SMLoc(), diag::err_duplicate_case_value, std::to_string(caseValue));
-                exit(1);
-            }
-            seenCaseValues.insert(caseValue);
-            break;
-        }
-
-        case Statement::SK_Default: {
-            // Check 3: It has multiple defaults
-            if (hasDefault) {
-                Diags.report(SMLoc(), diag::err_multiple_default_in_switch);
-                exit(1);
-            }
-            hasDefault = true;
-            break;
-        }
-
-        case Statement::SK_Compound: {
-            auto *compound = dynamic_cast<CompoundStatement *>(body);
-            Statement *prevStmt = nullptr;
-
-            // Go over each item to validate the body
-            for (auto &item: *compound) {
-                // Check if current item is a Declaration following case/default
-                if (std::holds_alternative<VarDeclaration *>(item)) {
-                    if (prevStmt &&
-                        (prevStmt->getKind() == Statement::SK_Case ||
-                         prevStmt->getKind() == Statement::SK_Default)) {
-                        if (!avoid_errors) {
-                            Diags.report(SMLoc(), diag::err_declaration_after_case_label);
-                            exit(1);
-                        }
-                    }
-                    // Reset prevStmt since a declaration is not a statement
-                    prevStmt = nullptr;
-                } else if (std::holds_alternative<Statement *>(item)) {
-                    Statement *stmt = std::get<Statement *>(item);
-                    validateSwitchBody(stmt, seenCaseValues, hasDefault);
-                    prevStmt = stmt;
-                }
-            }
-            break;
-        }
-
-        // Recursively check nested statements
-        case Statement::SK_If: {
-            auto *ifStmt = dynamic_cast<IfStatement *>(body);
-            validateSwitchBody(ifStmt->getThenSt(), seenCaseValues, hasDefault);
-            if (ifStmt->getElseSt())
-                validateSwitchBody(ifStmt->getElseSt(), seenCaseValues, hasDefault);
-            break;
-        }
-
-        case Statement::SK_While: {
-            auto *whileStmt = dynamic_cast<WhileStatement *>(body);
-            validateSwitchBody(whileStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
-        case Statement::SK_DoWhile: {
-            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(body);
-            validateSwitchBody(doWhileStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
-        case Statement::SK_For: {
-            auto *forStmt = dynamic_cast<ForStatement *>(body);
-            validateSwitchBody(forStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
     }
 }
 
@@ -281,6 +173,7 @@ void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &bre
             breakableStack.pop_back();
             break;
         }
+
         case Statement::SK_Switch: {
             auto *switchStmt = dynamic_cast<SwitchStatement *>(stmt);
             std::string switchLabel = generateSwitchLabel();
@@ -415,6 +308,126 @@ void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &bre
             break;
     }
 }
+
+
+bool Sema::isConstantExpression(Expr *expr) {
+    return expr->getKind() == Expr::Ek_Int;
+}
+
+int64_t Sema::evaluateConstantExpression(Expr *expr) {
+    if (auto *intLit = dynamic_cast<IntegerLiteral *>(expr)) {
+        return intLit->getValue().getSExtValue();
+    }
+    // this should never be reached since we only allow constant integers
+    return 0;
+}
+
+/**
+ * @brief Validate the body of a switch statement recursively. These validations
+ * are applied according to the C standard.
+ *
+ * Performs the following validations:
+ * 1. Case values must be constant expressions
+ * 2. No duplicate case values
+ * 3. At most one default case
+ * 4. No variable declarations immediately after case/default labels
+ *
+ * @param body Switch body statement to validate.
+ * @param seenCaseValues Set to track and detect duplicate case values.
+ * @param hasDefault Flag indicating if a default case has been seen.
+ */
+void Sema::validateSwitchBody(Statement *body,
+                              std::set<int64_t> &seenCaseValues,
+                              bool &hasDefault) {
+    if (!body) return;
+
+    switch (body->getKind()) {
+        case Statement::SK_Case: {
+            const auto *caseStmt = dynamic_cast<CaseStatement *>(body);
+
+            // First check, case value must be a constant integer
+            Expr *value = caseStmt->getValue();
+            if (!isConstantExpression(value)) {
+                Diags.report(SMLoc(), diag::err_case_value_not_constant);
+                exit(1);
+            }
+
+            // Second check, look for duplicated cases
+            int64_t caseValue = evaluateConstantExpression(value);
+            if (seenCaseValues.contains(caseValue)) {
+                Diags.report(SMLoc(), diag::err_duplicate_case_value, std::to_string(caseValue));
+                exit(1);
+            }
+            seenCaseValues.insert(caseValue);
+            break;
+        }
+
+        case Statement::SK_Default: {
+            // Check 3: It has multiple defaults
+            if (hasDefault) {
+                Diags.report(SMLoc(), diag::err_multiple_default_in_switch);
+                exit(1);
+            }
+            hasDefault = true;
+            break;
+        }
+
+        case Statement::SK_Compound: {
+            auto *compound = dynamic_cast<CompoundStatement *>(body);
+            Statement *prevStmt = nullptr;
+
+            // Go over each item to validate the body
+            for (auto &item: *compound) {
+                // Check if current item is a Declaration following case/default
+                if (std::holds_alternative<VarDeclaration *>(item)) {
+                    if (prevStmt &&
+                        (prevStmt->getKind() == Statement::SK_Case ||
+                         prevStmt->getKind() == Statement::SK_Default)) {
+                        if (!avoid_errors) {
+                            Diags.report(SMLoc(), diag::err_declaration_after_case_label);
+                            exit(1);
+                        }
+                    }
+                    // Reset prevStmt since a declaration is not a statement
+                    prevStmt = nullptr;
+                } else if (std::holds_alternative<Statement *>(item)) {
+                    Statement *stmt = std::get<Statement *>(item);
+                    validateSwitchBody(stmt, seenCaseValues, hasDefault);
+                    prevStmt = stmt;
+                }
+            }
+            break;
+        }
+
+        // Recursively check nested statements
+        case Statement::SK_If: {
+            auto *ifStmt = dynamic_cast<IfStatement *>(body);
+            validateSwitchBody(ifStmt->getThenSt(), seenCaseValues, hasDefault);
+            if (ifStmt->getElseSt())
+                validateSwitchBody(ifStmt->getElseSt(), seenCaseValues, hasDefault);
+            break;
+        }
+
+        case Statement::SK_While: {
+            auto *whileStmt = dynamic_cast<WhileStatement *>(body);
+            validateSwitchBody(whileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_DoWhile: {
+            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(body);
+            validateSwitchBody(doWhileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_For: {
+            auto *forStmt = dynamic_cast<ForStatement *>(body);
+            validateSwitchBody(forStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 
 void Sema::initialize() {
     CurrentScope = nullptr;

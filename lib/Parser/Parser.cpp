@@ -191,7 +191,6 @@ bool Parser::parseBlock(BlockItems &Items) {
     return false;
 }
 
-
 bool Parser::parseVarDeclaration(BlockItems &Items) {
     if (Tok.is(tok::kw_int)) {
         SMLoc Loc = Tok.getLocation();
