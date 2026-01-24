@@ -3,8 +3,7 @@
 #include "mycc/AST/AST.hpp"
 #include "mycc/IR/SimpleIR.hpp"
 
-namespace mycc {
-namespace codegen {
+namespace mycc::codegen {
 
 class IRGenerator {
     ir::Context& Ctx;
@@ -75,5 +74,4 @@ private:
     ir::Value* generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc);
 };
 
-}
 }

@@ -14,49 +14,143 @@ Program *Parser::parse() {
 }
 
 bool Parser::parseProgram(Program *&P) {
-    FuncList Funcs;
+    DeclarationList Decls;
 
-    // Enter a global scope for function declarations a global variables
+    // Enter a global scope for function declarations and global variables
     Actions.enterScope();
 
     // advance to the first token
     advance();
-    // now start consuming functions
+    // now start consuming declarations (functions or variables)
     while (Tok.isNot(tok::eof)) {
-        FunctionDeclaration *Func = nullptr;
-        if (!parseFunction(Func)) {
-            return false;
+        if (parseDeclaration(Decls)) {
+            return true;
         }
-        bool add_to_funcs = true;
-        for (auto *existing_func: Funcs) {
-            if (Func->getName() == existing_func->getName() &&
-                Func->getArgs().size() == existing_func->getArgs().size()) {
-                add_to_funcs = false;
-                break;
-            }
-        }
-        if (add_to_funcs)
-            Funcs.push_back(Func);
     }
 
-    P = Actions.actOnProgramDeclaration(Funcs);
+    P = Actions.actOnProgramDeclaration(Decls);
 
-    // Exit global scope after all functions parsed
+    // Exit global scope after all declarations parsed
     Actions.exitScope();
     return false;
 }
 
-bool Parser::parseFunction(FunctionDeclaration *&F) {
+std::vector specifiers = {
+    tok::kw_extern,
+    tok::kw_static,
+};
+
+std::vector types = {
+    tok::kw_int
+};
+
+bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
+                                    Type *&type,
+                                    StringRef &name,
+                                    SMLoc &loc,
+                                    bool allowStorageClass) {
+    storageClass = std::nullopt;
+    type = nullptr;
+
+    while (Tok.isOneOf(specifiers) || Tok.isOneOf(types)) {
+        if (Tok.isOneOf(specifiers)) {
+            if (!allowStorageClass && !Actions.is_avoid_errors_active()) {
+                getDiagnostics().report(Tok.getLocation(),
+                                        diag::err_for_loop_cannot_have_storage_class);
+                return true;
+            }
+            if (Tok.is(tok::kw_extern)) {
+                if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Static) {
+                    getDiagnostics().report(Tok.getLocation(),
+                                            diag::err_declaration_already_static);
+                    return true;
+                }
+                storageClass = StorageClass::SC_Extern;
+            } else if (Tok.is(tok::kw_static)) {
+                if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Extern) {
+                    getDiagnostics().report(Tok.getLocation(),
+                                            diag::err_declaration_already_extern);
+                    return true;
+                }
+                storageClass = StorageClass::SC_Static;
+            }
+        } else if (Tok.is(tok::kw_int)) {
+            if (type != nullptr) {
+                getDiagnostics().report(Tok.getLocation(),
+                                        diag::err_declaration_has_type);
+                delete type;
+                return true;
+            }
+            type = new BuiltinType(BuiltinType::Int);
+        }
+        advance();
+    }
+
+    // Expect identifier
+    if (expect(tok::identifier))
+        return true;
+
+    if (type == nullptr) {
+        getDiagnostics().report(Tok.getLocation(),
+                                diag::err_declaration_has_no_type,
+                                Tok.getIdentifier().str());
+        return true;
+    }
+
+    name = Tok.getIdentifier();
+    loc = Tok.getLocation();
+    advance();
+
+    return false;
+}
+
+bool Parser::parseDeclaration(DeclarationList &Decls) {
+    std::optional<StorageClass> storageClass;
+    Type *type = nullptr;
+    StringRef name;
+    SMLoc loc;
+
+    if (parseDeclarationHeader(storageClass, type, name, loc, true))
+        return true;
+
+    // Check if it's a function (has '(') or variable (has '=' or ';')
+    if (Tok.is(tok::l_paren)) {
+        // Function declaration
+        FunctionDeclaration *Func = nullptr;
+        if (!parseFunctionRest(Func, loc, name, storageClass))
+            return true;
+
+        // Check for duplicate declarations
+        bool add_to_decls = true;
+        for (const auto &decl: Decls) {
+            if (const auto *existing_func = std::get_if<FunctionDeclaration *>(&decl)) {
+                if (Func->getName() == (*existing_func)->getName() &&
+                    Func->getArgs().size() == (*existing_func)->getArgs().size()) {
+                    add_to_decls = false;
+                    break;
+                }
+            }
+        }
+        if (add_to_decls)
+            Decls.emplace_back(Func);
+    } else {
+        // Variable declaration
+        VarDeclaration *Var = nullptr;
+        if (!parseGlobalVarRest(Var, loc, name, storageClass))
+            return true;
+
+        Decls.emplace_back(Var);
+    }
+    return false;
+}
+
+bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef funcName,
+                               std::optional<StorageClass> storageClass) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
         return false;
     };
-
-    if (consume(tok::kw_int))
-        return _errorhandler();
-    if (expect(tok::identifier))
-        return _errorhandler();
 
     // Enter function-level state (labels, etc.)
     Actions.enterFunction();
@@ -64,17 +158,12 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
     // Enter function scope (for parameters AND body)
     Actions.enterScope();
 
-    StringRef funcName = Tok.getIdentifier();
-    SMLoc funcLoc = Tok.getLocation();
-
-    // advance to next token
-    advance();
-
     ArgsList args;
 
-    // for now consume "(void)"
+    // consume '('
     if (consume(tok::l_paren))
         return _errorhandler();
+
     // Check for void (no parameters) vs parameter list
     if (Tok.is(tok::kw_void)) {
         // int foo(void) - no parameters
@@ -110,6 +199,8 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
         return _errorhandler();
 
     F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args);
+    if (storageClass)
+        F->setStorageClass(*storageClass);
 
     if (Tok.is(tok::semi)) {
         advance();
@@ -127,7 +218,7 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
             return _errorhandler();
 
         // Check for multiple definitions (redefinition error)
-        if (F->hasBody()) {
+        if (F->hasBody() && !Actions.is_avoid_errors_active()) {
             getDiagnostics().report(funcLoc, diag::err_function_redefinition, funcName);
             return _errorhandler();
         }
@@ -149,38 +240,57 @@ bool Parser::parseFunction(FunctionDeclaration *&F) {
     return true;
 }
 
+bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
+                                std::optional<StorageClass> storageClass) {
+    auto _errorhandler = [this] {
+        while (!Tok.is(tok::eof))
+            advance();
+        return false;
+    };
+
+    // Create the variable in the current (global) scope
+    Var *var = Actions.actOnIdentifier(loc, name);
+    if (!var)
+        return _errorhandler();
+
+    Expr *initExpr = nullptr;
+
+    // Check for optional initializer
+    if (Tok.is(tok::equal)) {
+        advance();
+        if (parseExpr(initExpr, 0))
+            return _errorhandler();
+    }
+
+    if (consume(tok::semi))
+        return _errorhandler();
+
+    V = new VarDeclaration(loc, var, initExpr, storageClass);
+
+    return true;
+}
+
+
 bool Parser::parseBlock(BlockItems &Items) {
     while (Tok.isNot(tok::r_brace) && Tok.isNot(tok::eof)) {
-        if (Tok.is(tok::kw_int)) {
-            // Peek ahead to determine if it's a function or variable declaration
-            // int <identifier> ( -> function declaration
-            // int <identifier> = or ; -> variable declaration
+        // Check if this is a declaration (starts with type or storage class specifier)
+        if (Tok.isOneOf(specifiers) || Tok.isOneOf(types)) {
+            std::optional<StorageClass> storageClass;
+            Type *type = nullptr;
+            StringRef name;
+            SMLoc loc;
 
-            Token nextTok;
-            Lex.peek(nextTok);
+            if (parseDeclarationHeader(storageClass, type, name, loc, true))
+                return true;
 
-            if (nextTok.is(tok::identifier)) {
-                // Need to peek one more token ahead to see if it's '('
-                // Since we can't easily peek 2 tokens, we'll consume and check
-                advance(); // consume 'int'
-                StringRef name = Tok.getIdentifier();
-
-                SMLoc loc = Tok.getLocation();
-                advance(); // consume identifier
-
-                if (Tok.is(tok::l_paren)) {
-                    // Function declaration
-                    if (parseFunctionDeclarationStmt(Items, loc, name))
-                        return true;
-                } else {
-                    // Variable declaration - need to backtrack or handle inline
-                    // Since we can't backtrack easily, handle it here
-                    if (parseVariableDeclInline(Items, loc, name))
-                        return true;
-                }
+            // Check if it's a function (has '(') or variable (has '=' or ';')
+            if (Tok.is(tok::l_paren)) {
+                // Function declaration in block
+                if (parseFunctionDeclarationStmt(Items, loc, name, storageClass))
+                    return true;
             } else {
-                // Error case - let parseDeclaration handle it
-                if (parseVarDeclaration(Items))
+                // Variable declaration
+                if (parseVariableDeclInline(Items, loc, name, storageClass))
                     return true;
             }
         } else {
@@ -191,38 +301,33 @@ bool Parser::parseBlock(BlockItems &Items) {
     return false;
 }
 
-bool Parser::parseVarDeclaration(BlockItems &Items) {
-    if (Tok.is(tok::kw_int)) {
-        SMLoc Loc = Tok.getLocation();
-        // type is correct, advance it
-        advance();
-        if (expect(tok::identifier))
-            return true;
-        StringRef var = Tok.getIdentifier();
-        advance();
+bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass) {
+    std::optional<StorageClass> storageClass;
+    Type *type = nullptr;
+    StringRef name;
+    SMLoc loc;
 
-        // We generate the declaration first, so the variable
-        // exists in the scope
-        if (Actions.actOnVarDeclaration(Items, Loc, var))
+    if (parseDeclarationHeader(storageClass, type, name, loc, allowStorageClass))
+        return true;
+
+    // We generate the declaration first, so the variable
+    // exists in the scope
+    if (Actions.actOnVarDeclaration(Items, loc, name))
+        return true;
+
+    VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
+    if (storageClass)
+        decl->setStorageClass(*storageClass);
+
+    Expr *exp = nullptr;
+    // the assignment to the declaration is optional
+    if (Tok.is(tok::equal)) {
+        advance();
+        if (parseExpr(exp))
             return true;
-        // now we can generate the expression,
-        // if the variable is used in the declaration
-        // this is compliant with the standard, but it
-        // is an undefined behavior.
-        VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
-        Expr *exp = nullptr;
-        // the assignment to the declaration is
-        // optional
-        if (Tok.is(tok::equal)) {
-            advance();
-            if (parseExpr(exp))
-                return true;
-        }
-        decl->setExpr(exp);
-        return false;
     }
-
-    return true;
+    decl->setExpr(exp);
+    return false;
 }
 
 bool Parser::parseStatement(BlockItems &Items) {
@@ -502,12 +607,12 @@ bool Parser::parseForStmt(BlockItems &Items) {
     // We always enter the scope here, so if any declaration...
     Actions.enterScope();
     // Parse init (Declaration | Expr | nothing)
-    if (Tok.is(tok::kw_int)) {
-        // Use parseVarDeclaration instead of duplicating code
+    if (Tok.isOneOf(specifiers) || Tok.isOneOf(types)) {
+        // Use parseVarDeclaration with allowStorageClass=false for for-loops
         BlockItems tempItems;
-        if (parseVarDeclaration(tempItems))
+        if (parseVarDeclaration(tempItems, false))
             return true;
-        // We extract the decalaration from tempItems
+        // We extract the declaration from tempItems
         init = std::get<VarDeclaration *>(tempItems.back());
     } else if (!Tok.is(tok::semi)) {
         // Handle expression: i = 0
@@ -611,7 +716,8 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
     return false;
 }
 
-bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name) {
+bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                          std::optional<StorageClass> storageClass) {
     ArgsList args;
 
     if (consume(tok::l_paren))
@@ -655,6 +761,9 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     if (!F)
         return true;
 
+    if (storageClass)
+        F->setStorageClass(*storageClass);
+
     if (Tok.is(tok::semi)) {
         advance();
     } else {
@@ -687,7 +796,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     return false;
 }
 
-bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name) {
+bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                     std::optional<StorageClass> storageClass) {
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
 
@@ -695,6 +805,9 @@ bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Nam
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
+    if (storageClass)
+        decl->setStorageClass(*storageClass);
+
     Expr *exp = nullptr;
 
     if (Tok.is(tok::equal)) {

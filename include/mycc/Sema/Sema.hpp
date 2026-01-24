@@ -199,7 +199,7 @@ namespace mycc {
          * @param Funcs List of functions in the program.
          * @return Pointer to the created Program node.
          */
-        Program *actOnProgramDeclaration(FuncList &Funcs) const;
+        Program *actOnProgramDeclaration(DeclarationList &Funcs) const;
 
         /**
          * @brief Create a Function node.

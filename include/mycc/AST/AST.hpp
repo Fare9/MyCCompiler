@@ -12,7 +12,6 @@
 #include <fmt/core.h>
 
 #include "AST.hpp"
-#include "AST.hpp"
 
 namespace mycc {
     class Program;
@@ -23,10 +22,61 @@ namespace mycc {
 
     using ExprList = std::vector<Expr *>;
     using StmtList = std::vector<Statement *>;
-    using BlockItem = std::variant<Statement *, VarDeclaration *, FunctionDeclaration*, std::monostate>;
+    using BlockItem = std::variant<Statement *, VarDeclaration *, FunctionDeclaration *, std::monostate>;
     using ForInit = std::variant<VarDeclaration *, Expr *, std::monostate>;
     using BlockItems = std::vector<BlockItem>;
-    using FuncList = std::vector<FunctionDeclaration *>;
+    using DeclarationList = std::vector<std::variant<FunctionDeclaration *, VarDeclaration *> >;
+
+    // Storage class specifiers
+    enum class StorageClass {
+        SC_Static,
+        SC_Extern,
+    };
+
+    class Type {
+    public:
+        enum TypeKind {
+            TK_Builtin,
+            TK_Pointer,
+            TK_Function,
+        };
+
+    private:
+        const TypeKind Kind;
+
+    protected:
+        explicit Type(TypeKind Kind) : Kind(Kind) {
+        }
+
+    public:
+        virtual ~Type() = default;
+
+        [[nodiscard]] TypeKind getKind() const { return Kind; }
+    };
+
+    // For primitive types: int, void, char, etc.
+    class BuiltinType : public Type {
+    public:
+        enum BuiltinKind {
+            Int,
+            Void,
+            // For the moment, we can include in the future more
+        };
+
+    private:
+        BuiltinKind BuiltinK;
+
+    public:
+        explicit BuiltinType(BuiltinKind K)
+            : Type(TK_Builtin), BuiltinK(K) {
+        }
+
+        [[nodiscard]] BuiltinKind getBuiltinKind() const { return BuiltinK; }
+
+        static bool classof(const Type *T) {
+            return T->getKind() == TK_Builtin;
+        }
+    };
 
     // Base classes
 
@@ -105,7 +155,7 @@ namespace mycc {
 
         ~ReturnStatement() override = default;
 
-        Expr *getRetVal() const {
+        [[nodiscard]] Expr *getRetVal() const {
             return RetVal;
         }
 
@@ -123,7 +173,7 @@ namespace mycc {
 
         ~ExpressionStatement() override = default;
 
-        Expr *getExpr() const {
+        [[nodiscard]] Expr *getExpr() const {
             return expr;
         }
 
@@ -140,7 +190,8 @@ namespace mycc {
         Statement *else_st;
 
     public:
-        IfStatement(Expr *condition, Statement *then_st) : Statement(SK_If), condition(condition), then_st(then_st) {
+        IfStatement(Expr *condition, Statement *then_st) : Statement(SK_If), condition(condition), then_st(then_st),
+                                                           else_st(nullptr) {
         }
 
         IfStatement(Expr *condition, Statement *then_st, Statement *else_st) : Statement(SK_If), condition(condition),
@@ -149,15 +200,15 @@ namespace mycc {
 
         ~IfStatement() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return condition;
         }
 
-        Statement *getThenSt() const {
+        [[nodiscard]] Statement *getThenSt() const {
             return then_st;
         }
 
-        Statement *getElseSt() const {
+        [[nodiscard]] Statement *getElseSt() const {
             return else_st;
         }
 
@@ -183,11 +234,11 @@ namespace mycc {
             return block;
         }
 
-        const BlockItems &getBlock() const {
+        [[nodiscard]] const BlockItems &getBlock() const {
             return block;
         }
 
-        BlockItem get_item(size_t i) {
+        [[nodiscard]] BlockItem get_item(size_t i) const {
             return i >= block.size() ? std::monostate{} : block[i];
         }
 
@@ -221,7 +272,7 @@ namespace mycc {
 
         ~LabelStatement() override = default;
 
-        StringRef getLabel() const {
+        [[nodiscard]] StringRef getLabel() const {
             return Label;
         }
 
@@ -239,7 +290,7 @@ namespace mycc {
 
         ~GotoStatement() override = default;
 
-        StringRef getLabel() const {
+        [[nodiscard]] StringRef getLabel() const {
             return Label;
         }
 
@@ -249,7 +300,6 @@ namespace mycc {
     };
 
     class BreakStatement : public Statement {
-    private:
         std::string label;
 
     public:
@@ -258,11 +308,11 @@ namespace mycc {
 
         ~BreakStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -272,7 +322,6 @@ namespace mycc {
     };
 
     class ContinueStatement : public Statement {
-    private:
         std::string label;
 
     public:
@@ -281,11 +330,11 @@ namespace mycc {
 
         ~ContinueStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -309,19 +358,19 @@ namespace mycc {
 
         ~WhileStatement() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return Condition;
         }
 
-        Statement *getBody() const {
+        [[nodiscard]] Statement *getBody() const {
             return Body;
         }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -331,7 +380,6 @@ namespace mycc {
     };
 
     class DoWhileStatement : public Statement {
-    private:
         // Body of the do/while condition
         Statement *Body;
         // condition inside of while statement
@@ -345,19 +393,19 @@ namespace mycc {
 
         ~DoWhileStatement() override = default;
 
-        Statement *getBody() const {
+        [[nodiscard]] Statement *getBody() const {
             return Body;
         }
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return Condition;
         }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -367,7 +415,6 @@ namespace mycc {
     };
 
     class ForStatement : public Statement {
-    private:
         ForInit Init; // This can be a Declaration, Expr, or nothing
         Expr *Condition; // Optional condition
         Expr *Post; // Optional post expression
@@ -377,27 +424,27 @@ namespace mycc {
 
     public:
         ForStatement(ForInit init, Expr *condition, Expr *post, Statement *body) : Statement(SK_For),
-            Init(std::move(init)), Condition(condition),
+            Init(init), Condition(condition),
             Post(post), Body(body) {
         }
 
         ~ForStatement() override = default;
 
-        const ForInit &getInit() const {
+        [[nodiscard]] const ForInit &getInit() const {
             return Init;
         }
 
-        Expr *getCondition() const { return Condition; }
+        [[nodiscard]] Expr *getCondition() const { return Condition; }
 
-        Expr *getPost() const { return Post; }
+        [[nodiscard]] Expr *getPost() const { return Post; }
 
-        Statement *getBody() const { return Body; }
+        [[nodiscard]] Statement *getBody() const { return Body; }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -415,15 +462,15 @@ namespace mycc {
 
         ~CaseStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
-        Expr *getValue() const { return Value; }
+        [[nodiscard]] Expr *getValue() const { return Value; }
     };
 
     class DefaultStatement : public Statement {
@@ -434,15 +481,14 @@ namespace mycc {
 
         ~DefaultStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
     };
-
 
     class SwitchStatement : public Statement {
         Expr *Condition; // Controlling expression
@@ -452,19 +498,19 @@ namespace mycc {
         SwitchStatement(Expr *condition, Statement *body) : Statement(SK_Switch), Condition(condition), Body(body) {
         }
 
-        Expr *get_condition() const {
+        [[nodiscard]] Expr *get_condition() const {
             return Condition;
         }
 
-        Statement *get_body() const {
+        [[nodiscard]] Statement *get_body() const {
             return Body;
         }
 
-        void set_break_label(std::string label) {
+        void set_break_label(const std::string &label) {
             this->break_label = label;
         }
 
-        std::string_view get_break_label() const {
+        [[nodiscard]] std::string_view get_break_label() const {
             return this->break_label;
         }
     };
@@ -702,8 +748,8 @@ namespace mycc {
         Expr *expr;
 
     public:
-        PostfixOperator(SMLoc Loc, PostfixOpKind OpKind, Expr *expr) : Expr(Ek_PostfixOperator), Loc(Loc),
-                                                                       OpKind(OpKind), expr(expr) {
+        PostfixOperator(const SMLoc Loc, const PostfixOpKind OpKind, Expr *expr) : Expr(Ek_PostfixOperator), Loc(Loc),
+            OpKind(OpKind), expr(expr) {
         }
 
         ~PostfixOperator() override = default;
@@ -737,15 +783,15 @@ namespace mycc {
 
         ~ConditionalExpr() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return condition;
         }
 
-        Expr *getLeft() const {
+        [[nodiscard]] Expr *getLeft() const {
             return left;
         }
 
-        Expr *getRight() const {
+        [[nodiscard]] Expr *getRight() const {
             return right;
         }
 
@@ -792,12 +838,17 @@ namespace mycc {
         Var *Name;
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
+        std::optional<StorageClass> storageClass;
 
     public:
-        VarDeclaration(SMLoc Loc, Var *Name) : Loc(Loc), Name(Name) {
+        VarDeclaration(const SMLoc Loc, Var *Name) : Loc(Loc), Name(Name) {
         }
 
-        VarDeclaration(SMLoc Loc, Var *Name, Expr *expr) : Loc(Loc), Name(Name), expr(expr) {
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr) : Loc(Loc), Name(Name), expr(expr) {
+        }
+
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass)
+            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass) {
         }
 
         ~VarDeclaration() = default;
@@ -806,12 +857,20 @@ namespace mycc {
             return Name;
         }
 
-        Expr *getExpr() const {
+        [[nodiscard]] Expr *getExpr() const {
             return expr;
         }
 
         void setExpr(Expr *e) {
             expr = e;
+        }
+
+        [[nodiscard]] std::optional<StorageClass> getStorageClass() const {
+            return storageClass;
+        }
+
+        void setStorageClass(StorageClass sc) {
+            storageClass = sc;
         }
     };
 
@@ -819,11 +878,17 @@ namespace mycc {
         SMLoc Loc;
         StringRef Name;
         ArgsList args;
-        bool IsDefinition = false;  // True if function has a body (even if empty)
+        bool IsDefinition = false; // True if function has a body (even if empty)
         BlockItems body;
+        std::optional<StorageClass> storageClass;
 
     public:
-        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args) : Name(Name), Loc(Loc), args(std::move(args)) {
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args)
+            : Loc(Loc), Name(Name), args(std::move(args)) {
+        }
+
+        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
+            : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
         }
 
         ~FunctionDeclaration() = default;
@@ -834,7 +899,7 @@ namespace mycc {
 
         void setBody(BlockItems &s) {
             body = std::move(s);
-            IsDefinition = true;  // Mark as definition when body is set
+            IsDefinition = true; // Mark as definition when body is set
         }
 
         void setArgs(ArgsList &newArgs) {
@@ -869,7 +934,7 @@ namespace mycc {
             return args;
         }
 
-        BlockItem get_item(size_t i) {
+        [[nodiscard]] BlockItem get_item(size_t i) const {
             return i >= body.size() ? std::monostate{} : body[i];
         }
 
@@ -888,47 +953,59 @@ namespace mycc {
         [[nodiscard]] BlockItems::const_iterator end() const {
             return body.end();
         }
+
+        [[nodiscard]] std::optional<StorageClass> getStorageClass() const {
+            return storageClass;
+        }
+
+        void setStorageClass(StorageClass sc) {
+            storageClass = sc;
+        }
     };
 
     class Program {
-        FuncList functions;
+        DeclarationList declarations;
 
     public:
         Program() = default;
 
         ~Program() = default;
 
-        void add_functions(FuncList &funcs) {
-            functions = std::move(funcs);
+        void add_functions(DeclarationList &funcs) {
+            declarations = std::move(funcs);
         }
 
         void add_function(FunctionDeclaration *func) {
-            functions.push_back(func);
+            declarations.emplace_back(func);
         }
 
-        [[nodiscard]] size_t get_number_of_functions() const {
-            return functions.size();
+        void add_variable(VarDeclaration *var) {
+            declarations.emplace_back(var);
         }
 
-        FunctionDeclaration *get_function(size_t i) {
-            return i >= functions.size() ? nullptr : functions[i];
+        [[nodiscard]] size_t get_number_of_declarations() const {
+            return declarations.size();
+        }
+
+        [[nodiscard]] std::variant<FunctionDeclaration *, VarDeclaration *> get_declaration(size_t i) const {
+            return declarations.at(i);
         }
 
         // Iterator support for range-based for loops
-        FuncList::iterator begin() {
-            return functions.begin();
+        DeclarationList::iterator begin() {
+            return declarations.begin();
         }
 
-        FuncList::iterator end() {
-            return functions.end();
+        DeclarationList::iterator end() {
+            return declarations.end();
         }
 
-        [[nodiscard]] FuncList::const_iterator begin() const {
-            return functions.begin();
+        [[nodiscard]] DeclarationList::const_iterator begin() const {
+            return declarations.begin();
         }
 
-        [[nodiscard]] FuncList::const_iterator end() const {
-            return functions.end();
+        [[nodiscard]] DeclarationList::const_iterator end() const {
+            return declarations.end();
         }
     };
 }

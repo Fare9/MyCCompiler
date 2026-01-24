@@ -433,7 +433,7 @@ void Sema::initialize() {
     CurrentScope = nullptr;
 }
 
-Program *Sema::actOnProgramDeclaration(FuncList &Funcs) const {
+Program *Sema::actOnProgramDeclaration(DeclarationList &Funcs) const {
     auto *p = Context.createProgram<Program>();
     p->add_functions(Funcs);
     return p;

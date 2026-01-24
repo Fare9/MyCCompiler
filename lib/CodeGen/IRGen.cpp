@@ -6,9 +6,11 @@ using namespace mycc::codegen;
 
 void IRGenerator::generateIR(const Program &ASTProgram) {
     // Convert each AST function to IR function
-    for (const FunctionDeclaration *ASTFunc: ASTProgram) {
-        ir::Function *IRFunc = generateFunction(*ASTFunc);
-        IRProg.add_function(IRFunc);
+    for (const auto& decl : ASTProgram) {
+        if (const auto *ASTFunc = std::get_if<FunctionDeclaration *>(&decl)) {
+            ir::Function *IRFunc = generateFunction(**ASTFunc);
+            IRProg.add_function(IRFunc);
+        }
     }
 }
 

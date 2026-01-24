@@ -10,10 +10,14 @@ std::string ASTPrinter::print(const Program* program) {
 
 std::string ASTPrinter::print(const Program* program, int indent) {
     if (!program) return "null";
-    
+
     std::string output = getIndent(indent) + "Program\n";
-    for (auto* func : *program) {
-        output += print(func, indent + 1);
+    for (const auto& decl : *program) {
+        if (const auto *func = std::get_if<FunctionDeclaration*>(&decl)) {
+            output += print(*func, indent + 1);
+        } else if (const auto *var = std::get_if<VarDeclaration*>(&decl)) {
+            output += print(*var, indent + 1);
+        }
     }
     return output;
 }

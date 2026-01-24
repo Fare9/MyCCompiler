@@ -31,5 +31,9 @@ DIAG(err_duplicate_case_value, Error, "duplicate case value '{}'")
 DIAG(err_multiple_default_in_switch, Error, "multiple default labels in one switch")
 DIAG(err_declaration_after_case_label, Error, "a label can only be part of a statement and a declaration is not a statement")
 
-
+DIAG(err_declaration_has_no_type, Error, "declaration {} was specified without a type")
+DIAG(err_declaration_already_extern, Error, "declaration already has an 'extern' storage class")
+DIAG(err_declaration_already_static, Error, "declaration already has an 'static' storage class")
+DIAG(err_declaration_has_type, Error, "declaration already has a type assigned")
+DIAG(err_for_loop_cannot_have_storage_class, Error, "a declaration in a for loop cannot have a storage class")
 #undef DIAG

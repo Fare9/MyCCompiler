@@ -3,130 +3,169 @@
 #include "mycc/Basic/Diagnostic.hpp"
 #include "mycc/Lexer/Lexer.hpp"
 #include "mycc/Sema/Sema.hpp"
+#include "mycc/AST/AST.hpp"
 #include "mycc/AST/ASTContext.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <memory>
+#include <optional>
 
 namespace mycc {
+    class Parser {
+        // @brief parser will use the lexer to create the AST nodes
+        Lexer &Lex;
+        // @brief Sema object will apply semantic checks later, for now
+        // it will just create objects
+        Sema &Actions;
+        // @brief AST context for memory management
+        ASTContext &Context;
+        // @brief Current Token
+        Token Tok;
 
-class Parser {
-    // @brief parser will use the lexer to create the AST nodes
-    Lexer &Lex;
-    // @brief Sema object will apply semantic checks later, for now
-    // it will just create objects
-    Sema &Actions;
-    // @brief AST context for memory management
-    ASTContext &Context;
-    // @brief Current Token
-    Token Tok;
-
-    /// @brief Get the current diagnostic engine from lexer
-    /// @return diagnostic engine for errors
-    [[nodiscard]] DiagnosticsEngine &getDiagnostics() const {
-        return Lex.getDiagnostics();
-    }
-
-    /// @brief make lexer read the next token
-    void advance()
-    {
-        Lex.next(Tok);
-    }
-
-    /// @brief look for an expected token, in case an unexpected token is found report it
-    /// @param ExpectedTok token we expect now
-    /// @return true in case there was an error, false everything fine
-    [[nodiscard]] bool expect(tok::TokenKind ExpectedTok) const {
-        if (Tok.is(ExpectedTok)) // check if is expected token
-            return false; // no error
-
-        const char *Expected = tok::getPunctuatorSpelling(ExpectedTok);
-
-        if (!Expected)
-            Expected = tok::getKeywordSpelling(ExpectedTok);
-        if (!Expected)
-            Expected = tok::getTokenName(ExpectedTok);
-
-        StringRef Actual(Tok.getLocation().getPointer(), Tok.getLength());
-
-        getDiagnostics().report(Tok.getLocation(), diag::err_expected, Expected, Actual.str());
-
-        return true;
-    }
-
-    /// @brief Consume a current expected token, once consumed, advance to the next token.
-    /// @param ExpectedTok token we expect
-    /// @return false in case everything is fine, true in case of error
-    bool consume(tok::TokenKind ExpectedTok)
-    {
-        if (Tok.is(ExpectedTok))
-        {
-            advance();
-            return false;
+        /// @brief Get the current diagnostic engine from lexer
+        /// @return diagnostic engine for errors
+        [[nodiscard]] DiagnosticsEngine &getDiagnostics() const {
+            return Lex.getDiagnostics();
         }
 
-        return true;
-    }
+        /// @brief make lexer read the next token
+        void advance() {
+            Lex.next(Tok);
+        }
 
-    /***
-     * Full implementation of a Recursive descent parser
-     * for each one of the non-terminals and terminals
-     * parts of the EBNF. Since the parser is for a LL(1)
-     * grammar, we must avoid left recursion, so something
-     * like:
-     *
-     * stmnt : stmnt | ...
-     *
-     * Must be avoided, since that is translated to:
-     *
-     * bool parseStatement(StmtList &Stmts)
-     * {
-     *      parseStatement(Stmts);
-     *      ...
-     * }
-     *
-     * Finishing in an infinite recursion.
-    */
+        /// @brief look for an expected token, in case an unexpected token is found report it
+        /// @param ExpectedTok token we expect now
+        /// @return true in case there was an error, false everything fine
+        [[nodiscard]] bool expect(tok::TokenKind ExpectedTok) const {
+            if (Tok.is(ExpectedTok)) // check if is expected token
+                return false; // no error
 
-    /// @brief Parse a compilation unit (Program)
-    /// @param P program to parse
-    /// @return `true` if parsing was well, `false` otherwise
-    bool parseProgram(Program *&P);
-    bool parseFunction(FunctionDeclaration *&F);
+            const char *Expected = tok::getPunctuatorSpelling(ExpectedTok);
 
-    bool parseBlock(BlockItems& Items);
-    bool parseVarDeclaration(BlockItems& Items);
-    bool parseStatement(BlockItems& Items);
-    bool parseReturnStmt(BlockItems& Items);
-    bool parseExprStmt(BlockItems& Items);
-    bool parseIfStmt(BlockItems& Items);
-    bool parseCompoundStmt(BlockItems& Items);
-    bool parseGotoStmt(BlockItems& Items);
-    bool parseWhileStmt(BlockItems& Items);
-    bool parseDoWhileStmt(BlockItems& Items);
-    bool parseForStmt(BlockItems& Items);
-    // for switch statements
-    bool parseDefaultStatement(BlockItems& Items);
-    bool parseCaseStatement(BlockItems& Items);
-    bool parseSwitchStatement(BlockItems& Items);
+            if (!Expected)
+                Expected = tok::getKeywordSpelling(ExpectedTok);
+            if (!Expected)
+                Expected = tok::getTokenName(ExpectedTok);
 
-    bool parseFunctionDeclarationStmt(BlockItems& Items, SMLoc Loc, StringRef Name);
-    bool parseVariableDeclInline(BlockItems& Items, SMLoc Loc, StringRef Name);
+            StringRef Actual(Tok.getLocation().getPointer(), Tok.getLength());
 
-    bool parseExpr(Expr *&E, int min_precedence = 0);
-    bool parseMiddle(Expr *&Middle);
-    bool parseFactor(Expr *&E);
+            getDiagnostics().report(Tok.getLocation(), diag::err_expected, Expected, Actual.str());
+
+            return true;
+        }
+
+        /// @brief Consume a current expected token, once consumed, advance to the next token.
+        /// @param ExpectedTok token we expect
+        /// @return false in case everything is fine, true in case of error
+        bool consume(tok::TokenKind ExpectedTok) {
+            if (Tok.is(ExpectedTok)) {
+                advance();
+                return false;
+            }
+
+            return true;
+        }
+
+        /***
+         * Full implementation of a Recursive descent parser
+         * for each one of the non-terminals and terminals
+         * parts of the EBNF. Since the parser is for a LL(1)
+         * grammar, we must avoid left recursion, so something
+         * like:
+         *
+         * stmnt : stmnt | ...
+         *
+         * Must be avoided, since that is translated to:
+         *
+         * bool parseStatement(StmtList &Stmts)
+         * {
+         *      parseStatement(Stmts);
+         *      ...
+         * }
+         *
+         * Finishing in an infinite recursion.
+        */
+
+        /// @brief Parse a compilation unit (Program)
+        /// @param P program to parse
+        /// @return `true` if parsing was well, `false` otherwise
+        bool parseProgram(Program *&P);
+
+        /// @brief Parse the possible declarations that form a Program,
+        /// these are functions and variables.
+        /// @param Decls the full list of declarations.
+        /// @return `false` if parse was well, `true` otherwise.
+        bool parseDeclaration(DeclarationList &Decls);
+
+        /// @brief Parse the rest of a function after 'int name' has been consumed
+        bool parseFunctionRest(FunctionDeclaration *&F, SMLoc Loc, StringRef Name,
+                               std::optional<StorageClass> storageClass);
+
+        /// @brief Parse the rest of a global variable after 'int name' has been consumed
+        bool parseGlobalVarRest(VarDeclaration *&V, SMLoc Loc, StringRef Name,
+                                std::optional<StorageClass> storageClass);
+
+        bool parseBlock(BlockItems &Items);
+
+        /// @brief Parse declaration header: [storage-class]* type identifier
+        /// Stops after identifier, before '(' or '=' or ';'
+        bool parseDeclarationHeader(std::optional<StorageClass> &storageClass,
+                                    Type *&type,
+                                    StringRef &name,
+                                    SMLoc &loc,
+                                    bool allowStorageClass = true);
+
+        /// @brief Parse a declaration of a variable, it handles the storage class analysis
+        /// the type, and finally name and optionally initialization of a variable.
+        bool parseVarDeclaration(BlockItems &Items, bool allowStorageClass = true);
+
+        bool parseStatement(BlockItems &Items);
+
+        bool parseReturnStmt(BlockItems &Items);
+
+        bool parseExprStmt(BlockItems &Items);
+
+        bool parseIfStmt(BlockItems &Items);
+
+        bool parseCompoundStmt(BlockItems &Items);
+
+        bool parseGotoStmt(BlockItems &Items);
+
+        bool parseWhileStmt(BlockItems &Items);
+
+        bool parseDoWhileStmt(BlockItems &Items);
+
+        bool parseForStmt(BlockItems &Items);
+
+        // for switch statements
+        bool parseDefaultStatement(BlockItems &Items);
+
+        bool parseCaseStatement(BlockItems &Items);
+
+        bool parseSwitchStatement(BlockItems &Items);
+
+        bool parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                          std::optional<StorageClass> storageClass = std::nullopt);
+
+        bool parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                     std::optional<StorageClass> storageClass = std::nullopt);
+
+        bool parseExpr(Expr *&E, int min_precedence = 0);
+
+        bool parseMiddle(Expr *&Middle);
+
+        bool parseFactor(Expr *&E);
 
 
-    static BinaryOperator::BinaryOpKind parseBinOp(Token& Tok);
-    static int get_operator_kind_by_expr(Expr * expr);
-public:
-    Parser(Lexer &Lex, Sema &Actions, ASTContext &Context);
+        static BinaryOperator::BinaryOpKind parseBinOp(Token &Tok);
 
-    Program* parse();
-};
+        static int get_operator_kind_by_expr(Expr *expr);
 
+    public:
+        Parser(Lexer &Lex, Sema &Actions, ASTContext &Context);
 
+        Program *parse();
+    };
 }
