@@ -142,6 +142,14 @@ namespace mycc {
          */
         void checkGotoLabelsCorrectlyPointToFunction() const;
 
+        /**
+         * Compute the Linkage depending on the Storage class and the scope.
+         * @param sc optional value of storage class.
+         * @param scope scope of the declaration.
+         * @return linkage type.
+         */
+        static Linkage computeLinkage(std::optional<StorageClass> sc, ScopeType scope);
+
     public:
         /**
          * @brief Constructs a Sema object for semantic analysis.
@@ -208,7 +216,7 @@ namespace mycc {
          * @param args Function parameters.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const;
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass) const;
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
@@ -223,9 +231,10 @@ namespace mycc {
          * @param Items Block items list to append the declaration to.
          * @param Loc Source location of the declaration.
          * @param Name Variable name.
+         * @param storageClass type of storage (Static or Extern)
          * @return true on error (duplicate declaration), false on success.
          */
-        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const;
+        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name, std::optional<StorageClass> storageClass) const;
 
         /**
          * @brief Create a return statement.

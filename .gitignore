@@ -49,3 +49,6 @@ vcpkg/
 # Debug info
 *.dSYM/
 *.pdb
+
+# Internal stuff
+ToDo/

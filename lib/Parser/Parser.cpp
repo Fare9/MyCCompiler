@@ -152,17 +152,19 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         return false;
     };
 
+    ArgsList args;
+    BlockItems body;
+    bool parsedBody = false;
+
+    // consume '('
+    if (consume(tok::l_paren))
+        return _errorhandler();
+
     // Enter function-level state (labels, etc.)
     Actions.enterFunction();
 
     // Enter function scope (for parameters AND body)
     Actions.enterScope();
-
-    ArgsList args;
-
-    // consume '('
-    if (consume(tok::l_paren))
-        return _errorhandler();
 
     // Check for void (no parameters) vs parameter list
     if (Tok.is(tok::kw_void)) {
@@ -198,15 +200,14 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
     if (consume(tok::r_paren))
         return _errorhandler();
 
-    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args);
-    if (storageClass)
-        F->setStorageClass(*storageClass);
+    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass);
+    if (!F)
+        return _errorhandler();
 
     if (Tok.is(tok::semi)) {
         advance();
     } else {
         // consume body
-        BlockItems body;
         if (consume(tok::l_brace))
             return _errorhandler();
 
@@ -217,6 +218,14 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         if (consume(tok::r_brace))
             return _errorhandler();
 
+        parsedBody = true;
+    }
+
+    Actions.exitFunction();
+
+    Actions.exitScope();
+
+    if (parsedBody) {
         // Check for multiple definitions (redefinition error)
         if (F->hasBody() && !Actions.is_avoid_errors_active()) {
             getDiagnostics().report(funcLoc, diag::err_function_redefinition, funcName);
@@ -228,14 +237,10 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         F->setBody(body);
     }
 
-    Actions.exitFunction();
-
     // Once we have finished with the function,
     // we can assign the labels to the loop instructions
     // and the break/continue
     Actions.assignLoopLabels(*F);
-
-    Actions.exitScope();
 
     return true;
 }
@@ -312,12 +317,10 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
 
     // We generate the declaration first, so the variable
     // exists in the scope
-    if (Actions.actOnVarDeclaration(Items, loc, name))
+    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
-    if (storageClass)
-        decl->setStorageClass(*storageClass);
 
     Expr *exp = nullptr;
     // the assignment to the declaration is optional
@@ -719,6 +722,8 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
 bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
                                           std::optional<StorageClass> storageClass) {
     ArgsList args;
+    BlockItems body;
+    bool parsedBody = false;
 
     if (consume(tok::l_paren))
         return true;
@@ -757,12 +762,9 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         return true;
 
     // Create a Function object with no body (declaration only)
-    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args);
+    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass);
     if (!F)
         return true;
-
-    if (storageClass)
-        F->setStorageClass(*storageClass);
 
     if (Tok.is(tok::semi)) {
         advance();
@@ -770,7 +772,6 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         if (!Actions.is_avoid_errors_active())
             return true;
         // consume body
-        BlockItems body;
         if (consume(tok::l_brace))
             return true;
         // Parse statement sequence - fail immediately on error
@@ -779,6 +780,12 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         if (consume(tok::r_brace))
             return true;
 
+        parsedBody = true;
+    }
+
+    Actions.exitScope();
+
+    if (parsedBody) {
         // Check for multiple definitions (redefinition error)
         if (F->hasBody()) {
             getDiagnostics().report(Loc, diag::err_function_redefinition, Name);
@@ -790,8 +797,6 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         F->setBody(body);
     }
 
-    Actions.exitScope();
-
     Items.emplace_back(F);
     return false;
 }
@@ -801,12 +806,10 @@ bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Nam
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
 
-    if (Actions.actOnVarDeclaration(Items, Loc, Name))
+    if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
-    if (storageClass)
-        decl->setStorageClass(*storageClass);
 
     Expr *exp = nullptr;
 
