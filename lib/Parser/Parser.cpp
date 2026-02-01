@@ -313,21 +313,24 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
     if (parseDeclarationHeader(storageClass, type, name, loc, allowStorageClass))
         return true;
 
-    // We generate the declaration first, so the variable
-    // exists in the scope
+    // Add variable to scope first (so it can be referenced in initializer)
     if (Actions.actOnVarDeclaration(Items, loc, name, storageClass))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
 
-    Expr *exp = nullptr;
-    // the assignment to the declaration is optional
+    // Parse optional initializer (variable now exists in scope)
+    Expr *initExpr = nullptr;
     if (Tok.is(tok::equal)) {
         advance();
-        if (parseExpr(exp))
+        if (parseExpr(initExpr))
             return true;
     }
-    decl->setExpr(exp);
+
+    // Validate and set the initializer
+    if (Actions.actOnVarDeclarationInit(decl, initExpr))
+        return true;
+
     return false;
 }
 
@@ -804,23 +807,27 @@ bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Nam
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
 
+    // Add variable to scope first (so it can be referenced in initializer)
     if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
 
-    Expr *exp = nullptr;
-
+    // Parse optional initializer (variable now exists in scope)
+    Expr *initExpr = nullptr;
     if (Tok.is(tok::equal)) {
         advance();
-        if (parseExpr(exp))
+        if (parseExpr(initExpr))
             return true;
     }
 
     if (consume(tok::semi))
         return true;
 
-    decl->setExpr(exp);
+    // Validate and set the initializer
+    if (Actions.actOnVarDeclarationInit(decl, initExpr))
+        return true;
+
     return false;
 }
 

@@ -44,4 +44,5 @@ DIAG(err_non_constant_initializer, Error, "initializer element is not a compile-
 DIAG(err_function_redeclared_as_variable, Error, "redefinition of '{}' as different kind of symbol")
 DIAG(err_conflicting_variable_linkage, Error, "static declaration of '{}' follows non-static declaration")
 DIAG(err_conflicting_file_scope_definitions, Error, "redefinition of '{}'")
+DIAG(err_extern_variable_has_initializer, Error, "'{}' has both 'extern' and initializer")
 #undef DIAG

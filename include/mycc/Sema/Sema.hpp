@@ -227,14 +227,33 @@ namespace mycc {
         [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
 
         /**
-         * @brief Process a variable declaration and add it to the current scope.
+         * @brief Process a local variable declaration and add it to the current scope.
+         *
+         * Adds the variable to the symbol table. The initializer validation
+         * is done separately by actOnVarDeclarationInit after parsing the expression.
+         *
          * @param Items Block items list to append the declaration to.
          * @param Loc Source location of the declaration.
          * @param Name Variable name.
          * @param storageClass type of storage (Static or Extern)
-         * @return true on error (duplicate declaration), false on success.
+         * @return true on error, false on success.
          */
-        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name, std::optional<StorageClass> storageClass) const;
+        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                 std::optional<StorageClass> storageClass);
+
+        /**
+         * @brief Validate and set the initializer for a variable declaration.
+         *
+         * Implements semantic checks for block-scope variable initializers:
+         * - extern: no initializer allowed
+         * - static: must have constant initializer (or defaults to 0)
+         * - regular: any initializer allowed
+         *
+         * @param decl The variable declaration to validate.
+         * @param initExpr Optional initializer expression.
+         * @return true on error, false on success.
+         */
+        bool actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr);
 
         /**
          * @brief Process a file-scope (global) variable declaration.

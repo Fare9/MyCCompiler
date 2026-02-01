@@ -554,66 +554,125 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
 }
 
 /**
- * @brief Process a variable declaration and add it to the current scope.
+ * @brief Process a local variable declaration and add it to the current scope.
  *
- * Creates the variable with its original name, adds it to the current scope,
- * and appends the declaration to the block items. Reports an error if
- * a variable with the same name already exists in the current scope.
+ * Adds the variable to the symbol table. The initializer validation
+ * is done separately by actOnVarDeclarationInit after parsing the expression.
  *
  * @param Items Block items list to append the declaration to.
  * @param Loc Source location of the variable declaration.
  * @param Name Variable name.
  * @param storageClass type of storage (Static or Extern)
- * @return true if a duplicate declaration error occurred, false on success.
+ * @return true if an error occurred, false on success.
  */
 bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
-                               std::optional<StorageClass> storageClass) const {
-    // Should never happen during normal parsing
+                               std::optional<StorageClass> storageClass) {
     if (!CurrentScope) {
         return true;
     }
 
-    // Check for conflicts in current scope
-    // Book's rule: if prev_entry.from_current_scope AND NOT prev_entry.has_linkage → fail
-    // hasLinkageConflict returns true when NOT (prev has linkage AND new is extern)
+    // Check for conflicts in current scope first
     if (CurrentScope->hasSymbolInCurrentScope(Name) &&
         CurrentScope->hasLinkageConflict(Name, storageClass) && !avoid_errors) {
         Diags.report(Loc, diag::err_linkage_conflict, Name);
         return true;
     }
 
-    // Create declaration with original name (no renaming)
     auto *var = Context.createExpression<Var>(Loc, Name);
-    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, nullptr, storageClass);
 
-    // Determine scope from scope chain: no parent means global scope
-    ScopeType scope = (CurrentScope->getParentScope() == nullptr)
-                          ? ScopeType::Global
-                          : ScopeType::Local;
-
-    if (scope == ScopeType::Global) {
-        // File-scope: it's a simple case
-        // - Just insert with linkage, and keep the original name
-        // - No conflict checking needed (or different rules)
-        CurrentScope->insert(Name, decl, computeLinkage(storageClass, scope), scope);
-        CurrentScope->addDeclaredIdentifier(Name);
-    } else {
-        // Local scope
-        // If symbol already exists in current scope, it's a valid extern redeclaration
-        // (conflicts were already caught by the early check above)
-        if (!CurrentScope->hasSymbolInCurrentScope(Name)) {
-            CurrentScope->insert(Name, decl, computeLinkage(storageClass, scope), scope);
+    if (storageClass == StorageClass::SC_Extern) {
+        // extern local variable - check if symbol already exists (could be a function)
+        const SymbolEntry *oldEntry = CurrentScope->lookupEntry(Name);
+        if (oldEntry != nullptr) {
+            if (oldEntry->isFunction() && !avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                return true;
+            }
+            // Valid redeclaration of extern variable - don't add again to scope
+        } else {
+            // New extern declaration - add with StaticAttr(NoInitializer, global=true)
+            CurrentScope->insert(Name, decl, Linkage::External, ScopeType::Local);
             CurrentScope->addDeclaredIdentifier(Name);
+            StaticAttr attrs{InitialValue::NoInitializer, std::nullopt, true};
+            CurrentScope->updateSymbolEntry(Name, attrs);
         }
-        // else: valid extern redeclaration, skip insert (reuse existing symbol)
-    }
-
-    // Set storage class on declaration if provided
-    if (storageClass.has_value()) {
-        decl->setStorageClass(storageClass.value());
+    } else if (storageClass == StorageClass::SC_Static) {
+        // Static local - add with StaticAttr, init will be validated later
+        CurrentScope->insert(Name, decl, Linkage::Static, ScopeType::Local);
+        CurrentScope->addDeclaredIdentifier(Name);
+        // Temporarily set Initial(0), will be updated in actOnVarDeclarationInit
+        StaticAttr attrs{InitialValue::Initial, 0, false};
+        CurrentScope->updateSymbolEntry(Name, attrs);
+    } else {
+        // Regular local variable (automatic storage)
+        CurrentScope->insert(Name, decl, Linkage::None, ScopeType::Local);
+        CurrentScope->addDeclaredIdentifier(Name);
+        // LocalAttr is set automatically by SymbolEntry constructor
     }
 
     Items.emplace_back(decl);
+    return false;
+}
+
+/**
+ * @brief Validate and set the initializer for a variable declaration.
+ *
+ * Implements semantic checks for block-scope variable initializers:
+ * - extern: no initializer allowed
+ * - static: must have constant initializer (or defaults to 0)
+ * - regular: any initializer allowed
+ *
+ * @param decl The variable declaration to validate.
+ * @param initExpr Optional initializer expression.
+ * @return true if an error occurred, false on success.
+ */
+bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
+    if (!decl) return true;
+
+    std::optional<StorageClass> storageClass = decl->getStorageClass();
+    StringRef Name = decl->getVar()->getName();
+
+    if (storageClass == StorageClass::SC_Extern) {
+        // extern local variable - no initializer allowed
+        if (initExpr != nullptr && !avoid_errors) {
+            Diags.report(SMLoc(), diag::err_extern_variable_has_initializer, Name);
+            return true;
+        }
+        // Don't set expression for extern
+        return false;
+    }
+
+    if (storageClass == StorageClass::SC_Static) {
+        // static local variable - must have constant initializer
+        InitialValue initialValue;
+        std::optional<int64_t> constantValue = std::nullopt;
+
+        if (initExpr != nullptr) {
+            if (isConstantExpression(initExpr)) {
+                initialValue = InitialValue::Initial;
+                constantValue = evaluateConstantExpression(initExpr);
+            } else {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_non_constant_initializer);
+                    return true;
+                }
+                initialValue = InitialValue::Initial;
+                constantValue = 0;
+            }
+        } else {
+            // No initializer - defaults to 0
+            initialValue = InitialValue::Initial;
+            constantValue = 0;
+        }
+
+        // Update the symbol entry with the actual initial value
+        StaticAttr attrs{initialValue, constantValue, false};
+        CurrentScope->updateSymbolEntry(Name, attrs);
+    }
+
+    // Set the expression on the declaration
+    decl->setExpr(initExpr);
     return false;
 }
 
