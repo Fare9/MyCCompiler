@@ -30,6 +30,11 @@ namespace mycc {
         Scope *CurrentScope;
         bool avoid_errors = false;
 
+        // Track identifiers that have been given external linkage via block-scope extern.
+        // This is separate from scope visibility - used to detect conflicts with
+        // later file-scope static declarations.
+        std::set<std::string> BlockScopeExternLinkage;
+
 
         // Set that contains for a method the labels
         std::set<StringRef> FunctionLabels;

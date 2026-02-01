@@ -466,6 +466,15 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         globalScope = globalScope->getParentScope();
     }
 
+    // Check if we're at block scope (inside a function)
+    bool isBlockScope = (FuncScope != globalScope);
+
+    // Static function declarations at block scope are not allowed in C
+    if (isBlockScope && storageClass == StorageClass::SC_Static && !avoid_errors) {
+        Diags.report(Loc, diag::err_static_block_scope_function);
+        return nullptr;
+    }
+
     // Check local scope for conflict with local variable (no linkage)
     // Book's rule: "if prev_entry.from_current_scope and (not prev_entry.has_linkage): fail"
     if (FuncScope->hasSymbolInCurrentScope(Name)) {
@@ -475,6 +484,14 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
             Diags.report(Loc, diag::err_linkage_conflict, Name);
             return nullptr;
         }
+    }
+
+    // Check global scope for existing variable with same name
+    // (function cannot redeclare a file-scope variable)
+    VarDeclaration *existingVar = globalScope->lookupForVar(Name);
+    if (existingVar && !avoid_errors) {
+        Diags.report(Loc, diag::err_variable_redeclared_as_function, Name);
+        return nullptr;
     }
 
     // Check global scope for existing function declaration
@@ -495,6 +512,12 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         if (oldIsGlobal && newIsStatic && !avoid_errors) {
             Diags.report(Loc, diag::err_static_follows_non_static, Name);
             return nullptr;
+        }
+
+        // Also insert into local scope if different (for name lookup in this scope)
+        if (FuncScope != globalScope) {
+            FuncScope->addDeclaredIdentifier(Name);
+            FuncScope->insert(existing, computeLinkage(storageClass, scope), scope);
         }
 
         // Multiple declarations are allowed - return existing
@@ -582,21 +605,60 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, nullptr, storageClass);
 
     if (storageClass == StorageClass::SC_Extern) {
-        // extern local variable - check if symbol already exists (could be a function)
-        const SymbolEntry *oldEntry = CurrentScope->lookupEntry(Name);
-        if (oldEntry != nullptr) {
-            if (oldEntry->isFunction() && !avoid_errors) {
+        // extern local variable
+        // Step 1: Check CURRENT SCOPE ONLY for conflicts
+        // (can't have both "extern int x" and "int x" in the same scope)
+        if (CurrentScope->hasSymbolInCurrentScope(Name)) {
+            const SymbolEntry *currentEntry = CurrentScope->lookupEntry(Name);
+            if (currentEntry != nullptr) {
+                if (currentEntry->isFunction() && !avoid_errors) {
+                    Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                    return true;
+                }
+                // If there's already a local variable in current scope, it's a conflict
+                if (currentEntry->isLocalAttr() && !avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return true;
+                }
+                // If there's already a static local in current scope, it's a conflict
+                const StaticAttr *attrs = currentEntry->getStaticAttr();
+                if (attrs != nullptr && !attrs->global && !avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return true;
+                }
+                // Previous extern in current scope - valid redeclaration, don't add again
+                Items.emplace_back(decl);
+                return false;
+            }
+        }
+
+        // Step 2: Look at FILE/GLOBAL SCOPE for existing declaration with linkage
+        // (extern at block scope should refer to file-scope, not local vars in outer scopes)
+        Scope *globalScope = CurrentScope;
+        while (globalScope->getParentScope() != nullptr) {
+            globalScope = globalScope->getParentScope();
+        }
+
+        const SymbolEntry *globalEntry = globalScope->lookupEntry(Name);
+        if (globalEntry != nullptr) {
+            if (globalEntry->isFunction() && !avoid_errors) {
                 Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
                 return true;
             }
-            // Valid redeclaration of extern variable - don't add again to scope
+            // Found existing declaration with linkage - inherit its attributes
         } else {
-            // New extern declaration - add with StaticAttr(NoInitializer, global=true)
-            CurrentScope->insert(Name, decl, Linkage::External, ScopeType::Local);
-            CurrentScope->addDeclaredIdentifier(Name);
-            StaticAttr attrs{InitialValue::NoInitializer, std::nullopt, true};
-            CurrentScope->updateSymbolEntry(Name, attrs);
+            // No prior declaration with linkage exists.
+            // Block-scope extern creates a NEW identifier with external linkage.
+            // Track this for conflict detection with later file-scope static declarations,
+            // but DON'T add to global scope's visible symbols (name is only visible in block).
+            BlockScopeExternLinkage.insert(Name.str());
         }
+
+        // Add extern declaration to current scope for local name lookup
+        CurrentScope->insert(Name, decl, Linkage::External, ScopeType::Local);
+        CurrentScope->addDeclaredIdentifier(Name);
+        StaticAttr attrs{InitialValue::NoInitializer, std::nullopt, true};
+        CurrentScope->updateSymbolEntry(Name, attrs);
     } else if (storageClass == StorageClass::SC_Static) {
         // Static local - add with StaticAttr, init will be validated later
         CurrentScope->insert(Name, decl, Linkage::Static, ScopeType::Local);
@@ -711,6 +773,13 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
 
     // Step 4: Determine global linkage (external vs internal)
     bool global = (storageClass != StorageClass::SC_Static);
+
+    // Check for conflict with block-scope extern that established external linkage
+    if (!global && BlockScopeExternLinkage.contains(Name.str()) && !avoid_errors) {
+        // File-scope static conflicts with prior block-scope extern (which has external linkage)
+        Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+        return nullptr;
+    }
 
     // Step 5: Check if symbol already exists in the symbol table
     const SymbolEntry *oldEntry = CurrentScope->lookupEntry(Name);

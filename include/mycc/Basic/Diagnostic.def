@@ -45,4 +45,6 @@ DIAG(err_function_redeclared_as_variable, Error, "redefinition of '{}' as differ
 DIAG(err_conflicting_variable_linkage, Error, "static declaration of '{}' follows non-static declaration")
 DIAG(err_conflicting_file_scope_definitions, Error, "redefinition of '{}'")
 DIAG(err_extern_variable_has_initializer, Error, "'{}' has both 'extern' and initializer")
+DIAG(err_variable_redeclared_as_function, Error, "redefinition of '{}' as different kind of symbol")
+DIAG(err_static_block_scope_function, Error, "function declared in block scope cannot have 'static' storage class")
 #undef DIAG
