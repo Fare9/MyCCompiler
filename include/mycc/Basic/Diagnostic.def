@@ -39,4 +39,9 @@ DIAG(err_declaration_already_extern, Error, "declaration already has an 'extern'
 DIAG(err_declaration_already_static, Error, "declaration already has an 'static' storage class")
 DIAG(err_declaration_has_type, Error, "declaration already has a type assigned")
 DIAG(err_for_loop_cannot_have_storage_class, Error, "a declaration in a for loop cannot have a storage class")
+
+DIAG(err_non_constant_initializer, Error, "initializer element is not a compile-time constant")
+DIAG(err_function_redeclared_as_variable, Error, "redefinition of '{}' as different kind of symbol")
+DIAG(err_conflicting_variable_linkage, Error, "static declaration of '{}' follows non-static declaration")
+DIAG(err_conflicting_file_scope_definitions, Error, "redefinition of '{}'")
 #undef DIAG

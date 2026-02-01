@@ -237,6 +237,26 @@ namespace mycc {
         bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name, std::optional<StorageClass> storageClass) const;
 
         /**
+         * @brief Process a file-scope (global) variable declaration.
+         *
+         * Implements the semantic analysis for file-scope variables as described
+         * in Chapter 10 of "Writing a C Compiler". Handles:
+         * - Constant initializer validation
+         * - Tentative definitions
+         * - extern declarations without initializers
+         * - Linkage conflict detection between declarations
+         * - Merging of multiple declarations of the same variable
+         *
+         * @param Loc Source location of the declaration.
+         * @param Name Variable name.
+         * @param initExpr Optional initializer expression (must be constant if present).
+         * @param storageClass Storage class specifier (Static, Extern, or none).
+         * @return VarDeclaration pointer on success, nullptr on error.
+         */
+        [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
+                                                                 std::optional<StorageClass> storageClass);
+
+        /**
          * @brief Create a return statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the return statement.

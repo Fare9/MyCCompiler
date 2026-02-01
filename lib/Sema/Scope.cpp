@@ -94,6 +94,17 @@ bool Scope::hasLinkageConflict(StringRef Name, std::optional<StorageClass> newSt
     return !(prevHasLinkage && newIsExtern);
 }
 
+bool Scope::updateSymbolEntry(StringRef Name, const StaticAttr &newAttrs) {
+    auto I = Symbols.find(Name);
+    if (I == Symbols.end()) {
+        return false;
+    }
+
+    // Update the attrs with the new StaticAttr
+    I->second.attrs = newAttrs;
+    return true;
+}
+
 void Scope::addDeclaredIdentifier(StringRef originalName) {
     DeclaredIdentifiers.push_back(originalName.str());
 }

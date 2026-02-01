@@ -219,6 +219,9 @@ namespace mycc {
         // Check if a symbol has a linkage conflict with an existing symbol
         [[nodiscard]] bool hasLinkageConflict(StringRef Name, std::optional<StorageClass> newStorageClass) const;
 
+        // Update the attributes of an existing symbol entry (for file scope variable merging)
+        bool updateSymbolEntry(StringRef Name, const StaticAttr &newAttrs);
+
         void addDeclaredIdentifier(StringRef originalName);
 
         [[nodiscard]] const std::vector<std::string> &getDeclaredIdentifiers() const { return DeclaredIdentifiers; }

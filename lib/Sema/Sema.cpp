@@ -617,6 +617,124 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
     return false;
 }
 
+VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
+                                                 std::optional<StorageClass> storageClass) {
+    // Step 1-3: Determine initial_value based on initializer
+    InitialValue initialValue;
+    std::optional<int64_t> constantValue = std::nullopt;
+
+    if (initExpr != nullptr) {
+        // Has an initializer - must be a constant integer
+        // Future improvements could be done here to allow
+        // more expression types
+        if (isConstantExpression(initExpr)) {
+            initialValue = InitialValue::Initial;
+            constantValue = evaluateConstantExpression(initExpr);
+        } else {
+            // Non-constant initializer at file scope is an error
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_non_constant_initializer);
+                return nullptr;
+            }
+            initialValue = InitialValue::Tentative; // Fallback for error recovery
+        }
+    } else {
+        // No initializer
+        if (storageClass == StorageClass::SC_Extern) {
+            // If it is extern, this value could come from another file
+            // we cannot provide a value 0 for initialization
+            initialValue = InitialValue::NoInitializer;
+        } else {
+            // If it is not Extern, a tenative value could be 0
+            initialValue = InitialValue::Tentative;
+        }
+    }
+
+    // Step 4: Determine global linkage (external vs internal)
+    bool global = (storageClass != StorageClass::SC_Static);
+
+    // Step 5: Check if symbol already exists in the symbol table
+    const SymbolEntry *oldEntry = CurrentScope->lookupEntry(Name);
+    if (oldEntry != nullptr) {
+        // Check if it's a function being redeclared as a variable
+        if (oldEntry->isFunction()) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                return nullptr;
+            }
+        }
+
+        // Get the old static attributes
+        const StaticAttr *oldAttrs = oldEntry->getStaticAttr();
+        if (oldAttrs == nullptr) {
+            // It's a LocalAttr which shouldn't happen at file scope, treat as error
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                return nullptr;
+            }
+        } else {
+            // Handle extern: inherit global from previous declaration
+            if (storageClass == StorageClass::SC_Extern) {
+                global = oldAttrs->global;
+            } else if (oldAttrs->global != global) {
+                // Conflicting linkage (static vs non-static)
+                if (!avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return nullptr;
+                }
+            }
+
+            // Merge initialization values
+            if (oldAttrs->init == InitialValue::Initial) {
+                // Old declaration has a constant initializer
+                if (initialValue == InitialValue::Initial) {
+                    // Both have constant initializers - conflicting definitions
+                    if (!avoid_errors) {
+                        Diags.report(Loc, diag::err_conflicting_file_scope_definitions, Name);
+                        return nullptr;
+                    }
+                } else {
+                    // Keep the old initializer
+                    initialValue = oldAttrs->init;
+                    constantValue = oldAttrs->value;
+                }
+            } else if (initialValue != InitialValue::Initial && oldAttrs->init == InitialValue::Tentative) {
+                // Both are tentative or new is NoInitializer and old is Tentative
+                initialValue = InitialValue::Tentative;
+            }
+        }
+
+        // Update the existing symbol entry with merged attributes
+        StaticAttr newAttrs{initialValue, constantValue, global};
+        CurrentScope->updateSymbolEntry(Name, newAttrs);
+
+        // Return the existing variable declaration (don't create a new one)
+        VarDeclaration *existingDecl = CurrentScope->lookupForVar(Name);
+        if (existingDecl && initExpr != nullptr && existingDecl->getExpr() == nullptr) {
+            // Update the existing declaration with the new initializer
+            existingDecl->setExpr(initExpr);
+        }
+        return existingDecl;
+    }
+
+    // Step 7: Create new declaration and add to symbol table
+    auto *var = Context.createExpression<Var>(Loc, Name);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, initExpr, storageClass);
+
+    // Create the StaticAttr and insert into scope
+    // Note: We manually construct the symbol entry since we need specific initial values
+    StaticAttr attrs{initialValue, constantValue, global};
+    Linkage linkage = global ? Linkage::External : Linkage::Static;
+
+    CurrentScope->insert(Name, decl, linkage, ScopeType::Global);
+    CurrentScope->addDeclaredIdentifier(Name);
+
+    // Update the symbol entry with the correct StaticAttr (overwrite the one created by insert)
+    CurrentScope->updateSymbolEntry(Name, attrs);
+
+    return decl;
+}
+
 void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const {
     Items.emplace_back(Context.createStatement<ReturnStatement>(RetVal));
 }

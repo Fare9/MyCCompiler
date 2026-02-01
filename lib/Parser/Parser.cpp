@@ -253,11 +253,6 @@ bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
         return false;
     };
 
-    // Create the variable in the current (global) scope
-    Var *var = Actions.actOnIdentifier(loc, name);
-    if (!var)
-        return _errorhandler();
-
     Expr *initExpr = nullptr;
 
     // Check for optional initializer
@@ -270,7 +265,10 @@ bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
     if (consume(tok::semi))
         return _errorhandler();
 
-    V = new VarDeclaration(loc, var, initExpr, storageClass);
+    // Perform semantic analysis for the global variable declaration
+    V = Actions.actOnGlobalVarDeclaration(loc, name, initExpr, storageClass);
+    if (!V)
+        return _errorhandler();
 
     return true;
 }
