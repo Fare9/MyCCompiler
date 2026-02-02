@@ -20,12 +20,14 @@ namespace mycc::ir {
     class Context;
     class Program;
     class Function;
+    class StaticVariable;
     class Value;
     class Instruction;
     class Operand;
     class ParameterOp;
 
     using FuncList = std::vector<Function *>;
+    using StaticVarList = std::vector<StaticVariable *>;
     using InstList = std::vector<Instruction *>;
     using Args = std::vector<ParameterOp *>;
 
@@ -130,6 +132,20 @@ namespace mycc::ir {
 
         [[nodiscard]] std::string to_string() const override {
             return "%r" + std::to_string(RegID);
+        }
+    };
+
+    class StaticVarOp : public Operand {
+        std::string Identifier;
+
+    public:
+        StaticVarOp(const StringRef Identifier) : Identifier(Identifier) {
+        }
+
+        [[nodiscard]] std::string getName() const { return Identifier; }
+
+        [[nodiscard]] std::string to_string() const override {
+            return "@" + Identifier;
         }
     };
 
@@ -701,10 +717,38 @@ namespace mycc::ir {
         }
     };
 
+    class StaticVariable {
+        std::string Identifier;
+        bool Global;
+        int InitialValue;
+
+    public:
+        StaticVariable(const StringRef Identifier, const bool Global, const int InitialValue = 0)
+            : Identifier(Identifier), Global(Global), InitialValue(InitialValue) {
+        }
+
+        [[nodiscard]] std::string getName() const { return Identifier; }
+
+        [[nodiscard]] bool isGlobal() const { return Global; }
+
+        [[nodiscard]] int getInitialValue() const { return InitialValue; }
+
+        [[nodiscard]] std::string to_string() const {
+            // Format: @name = [internal] global i32 <value>
+            std::string result = "@" + Identifier + " = ";
+            if (!Global) {
+                result += "internal ";
+            }
+            result += "global i32 " + std::to_string(InitialValue);
+            return result;
+        }
+    };
+
     class Function {
         InstList Instructions;
         StringRef Name;
         Args args;
+        bool global = true;
 
     public:
         Function() = default;
@@ -716,12 +760,21 @@ namespace mycc::ir {
                                                                        Name(Name), args(std::move(args)) {
         }
 
+        Function(InstList &Instructions, StringRef Name, Args &args, bool global) : Instructions(
+                std::move(Instructions)),
+            Name(Name), args(std::move(args)), global(global) {
+        }
+
         [[nodiscard]] StringRef get_name() const {
             return Name;
         }
 
         [[nodiscard]] size_t size() const {
             return Instructions.size();
+        }
+
+        [[nodiscard]] bool isGlobal() const {
+            return global;
         }
 
         [[nodiscard]] bool empty() const {
@@ -779,6 +832,7 @@ namespace mycc::ir {
 
     class Program {
         FuncList Funcs;
+        StaticVarList StaticVars;
         StringRef Name;
         std::unique_ptr<Context> Ctx;
 
@@ -796,6 +850,9 @@ namespace mycc::ir {
         ~Program() {
             for (const auto &F: Funcs) {
                 delete F;
+            }
+            for (const auto &SV: StaticVars) {
+                delete SV;
             }
         }
 
@@ -817,6 +874,11 @@ namespace mycc::ir {
             Funcs.push_back(F);
         }
 
+        void add_static_variable(StaticVariable *SV) {
+            StaticVars.push_back(SV);
+        }
+
+        // Function iterators
         FuncList::iterator begin() {
             return Funcs.begin();
         }
@@ -833,8 +895,36 @@ namespace mycc::ir {
             return Funcs.end();
         }
 
+        // Static variable iterators
+        StaticVarList::iterator static_vars_begin() {
+            return StaticVars.begin();
+        }
+
+        StaticVarList::iterator static_vars_end() {
+            return StaticVars.end();
+        }
+
+        [[nodiscard]] StaticVarList::const_iterator static_vars_begin() const {
+            return StaticVars.begin();
+        }
+
+        [[nodiscard]] StaticVarList::const_iterator static_vars_end() const {
+            return StaticVars.end();
+        }
+
+        [[nodiscard]] const StaticVarList &getStaticVars() const {
+            return StaticVars;
+        }
+
         [[nodiscard]] std::string to_string() const {
             std::string result = "; Program: " + get_name().str() + "\n\n";
+            // Print static variables first (like LLVM IR does)
+            for (const StaticVariable *sv: StaticVars) {
+                result += sv->to_string() + "\n";
+            }
+            if (!StaticVars.empty()) {
+                result += "\n";
+            }
             for (const Function *func: Funcs) {
                 result += func->to_string() + "\n";
             }
@@ -844,6 +934,7 @@ namespace mycc::ir {
 
     class Context {
         StringMap<VarOp *> Variables;
+        StringMap<StaticVarOp *> StaticVars;
         std::unordered_map<std::string, Label *> Labels;
         std::unordered_map<std::int64_t, Int *> all_integer_values;
         std::vector<std::unique_ptr<Value> > Values;
@@ -922,6 +1013,16 @@ namespace mycc::ir {
             auto *newVar = new VarOp(Name);
             Values.emplace_back(newVar);
             Variables[Name] = newVar;
+            return newVar;
+        }
+
+        StaticVarOp *getOrCreateStaticVar(const StringRef Name) {
+            if (StaticVars.contains(Name)) {
+                return StaticVars[Name];
+            }
+            auto *newVar = new StaticVarOp(Name);
+            Values.emplace_back(newVar);
+            StaticVars[Name] = newVar;
             return newVar;
         }
 

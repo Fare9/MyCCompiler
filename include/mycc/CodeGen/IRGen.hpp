@@ -1,13 +1,19 @@
 #pragma once
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/Sema/Scope.hpp"
 #include "mycc/IR/SimpleIR.hpp"
+
 
 namespace mycc::codegen {
 
 class IRGenerator {
     ir::Context& Ctx;
     ir::Program& IRProg;
+    const Scope* Symbols = nullptr;  // GlobalSymbolTable for looking up variable attributes
+
+    // Current function name for generating unique static local names
+    std::string CurrentFunctionName;
 
     // Variable renaming for SSA-style naming
     unsigned int VariableCounter = 0;
@@ -35,9 +41,13 @@ public:
         : Ctx(Ctx), IRProg(IRProg) {}
     
     // Convert AST Program to IR Program
-    void generateIR(const Program& ASTProgram);
+    void generateIR(const Program& ASTProgram, const Scope& symbols);
     
 private:
+
+    // Generate static variables from the Symbol tables in Scope
+    void convertSymbolsToTacky(const Scope& symbols);
+
     // Convert AST Function to IR Function
     ir::Function* generateFunction(const FunctionDeclaration& ASTFunc);
 

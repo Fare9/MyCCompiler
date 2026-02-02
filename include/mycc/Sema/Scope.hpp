@@ -211,7 +211,7 @@ namespace mycc {
         FunctionDeclaration *lookupForFunction(StringRef Name);
 
         // Lookup the SymbolEntry for a name (returns nullptr if not found)
-        const SymbolEntry *lookupEntry(StringRef Name) const;
+        [[nodiscard]] const SymbolEntry *lookupEntry(StringRef Name) const;
 
         // Check if a symbol exists in the current scope only (not parent scopes)
         [[nodiscard]] bool hasSymbolInCurrentScope(StringRef Name) const;
@@ -227,5 +227,7 @@ namespace mycc {
         [[nodiscard]] const std::vector<std::string> &getDeclaredIdentifiers() const { return DeclaredIdentifiers; }
 
         [[nodiscard]] Scope *getParentScope() const { return parentScope; }
+
+        [[nodiscard]] const StringMap<SymbolEntry> &getSymbols() const { return Symbols; }
     };
 }

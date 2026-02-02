@@ -161,7 +161,7 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         return _errorhandler();
 
     // Enter function-level state (labels, etc.)
-    Actions.enterFunction();
+    Actions.enterFunction(funcName);
 
     // Enter function scope (for parameters AND body)
     Actions.enterScope();

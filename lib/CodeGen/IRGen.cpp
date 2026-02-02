@@ -1,10 +1,16 @@
 #include "mycc/CodeGen/IRGen.hpp"
+
+#include <set>
+
 #include "llvm/Support/Casting.h"
 
 using namespace mycc;
 using namespace mycc::codegen;
 
-void IRGenerator::generateIR(const Program &ASTProgram) {
+void IRGenerator::generateIR(const Program &ASTProgram, const Scope& symbols) {
+    // Store symbol table for lookups during expression generation
+    Symbols = &symbols;
+
     // Convert each AST function to IR function
     for (const auto& decl : ASTProgram) {
         if (const auto *ASTFunc = std::get_if<FunctionDeclaration *>(&decl)) {
@@ -12,9 +18,47 @@ void IRGenerator::generateIR(const Program &ASTProgram) {
             IRProg.add_function(IRFunc);
         }
     }
+
+    // After processing the AST, convert symbol table entries to static variables
+    // Important: Process AST first, then symbol table (matters in Chapter 16+)
+    convertSymbolsToTacky(symbols);
+}
+
+void IRGenerator::convertSymbolsToTacky(const Scope& symbols) {
+    std::set<std::string> StaticVars;
+
+    for (const auto& [name, entry] : symbols.getSymbols()) {
+        // Skip if not a static variable (functions and local vars are skipped)
+        if (!entry.isStaticAttr()) {
+            continue;
+        }
+
+        const StaticAttr* staticAttr = entry.getStaticAttr();
+
+        // Skip if NoInitializer (extern declaration, defined elsewhere)
+        if (staticAttr->init == InitialValue::NoInitializer) {
+            continue;
+        }
+
+        // Determine initial value
+        int initValue = 0;
+        if (staticAttr->init == InitialValue::Initial && staticAttr->value.has_value()) {
+            initValue = static_cast<int>(staticAttr->value.value());
+        }
+        // Tentative definitions get initialized to 0 (already default)
+
+        // Create the StaticVariable and add to program (avoid duplicates)
+        if (StaticVars.insert(name.str()).second) {
+            auto* staticVar = new ir::StaticVariable(name, staticAttr->global, initValue);
+            IRProg.add_static_variable(staticVar);
+        }
+    }
 }
 
 ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) {
+    // Set current function name for static local name generation
+    CurrentFunctionName = ASTFunc.getName().str();
+
     // Create IR function arguments first
     ir::Args args;
 
@@ -452,8 +496,29 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
 }
 
 ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFunc) {
-    // Look up the renamed name for this variable
-    std::string irName = getIRName(var.getName());
+    StringRef originalName = var.getName();
+
+    if (Symbols) {
+        // Check for file-scope static variable (stored with original name)
+        if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
+            if (entry->isStaticAttr()) {
+                // File-scope static - use original name
+                return Ctx.getOrCreateStaticVar(originalName);
+            }
+        }
+
+        // Check for static local variable (stored with unique name: functionName.varName)
+        std::string uniqueName = CurrentFunctionName + "." + originalName.str();
+        if (const SymbolEntry* entry = Symbols->lookupEntry(uniqueName)) {
+            if (entry->isStaticAttr()) {
+                // Static local - use unique name
+                return Ctx.getOrCreateStaticVar(uniqueName);
+            }
+        }
+    }
+
+    // Local variable - use renamed name
+    std::string irName = getIRName(originalName);
     return Ctx.getOrCreateVar(irName);
 }
 

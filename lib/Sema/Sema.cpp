@@ -10,7 +10,8 @@ using namespace mycc;
  * This method resets the FunctionLabels and GotoLabels sets to prepare
  * for semantic analysis of a new function.
  */
-void Sema::enterFunction() {
+void Sema::enterFunction(StringRef name) {
+    CurrentFunctionName = name.str();
     FunctionLabels.clear();
     GotoLabels.clear();
 }
@@ -60,7 +61,6 @@ void Sema::exitScope() {
     assert(CurrentScope && "Can't exit non-existing scope");
 
     Scope *Parent = CurrentScope->getParentScope();
-    // delete current scope
     delete CurrentScope;
     CurrentScope = Parent;
 }
@@ -445,6 +445,7 @@ void Sema::validateSwitchBody(Statement *body,
 
 void Sema::initialize() {
     CurrentScope = nullptr;
+    GlobalSymbolTable = new Scope(nullptr);  // Separate table for IR generation
 }
 
 Program *Sema::actOnProgramDeclaration(DeclarationList &Funcs) const {
@@ -454,20 +455,13 @@ Program *Sema::actOnProgramDeclaration(DeclarationList &Funcs) const {
 }
 
 FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
-                                                    std::optional<StorageClass> storageClass) const {
+                                                    std::optional<StorageClass> storageClass) {
     auto *FuncScope = CurrentScope->getParentScope();
     // Functions have linkage (external or internal/static)
     constexpr ScopeType scope = ScopeType::Global;
 
-    // Get the global/file scope for function tracking
-    // (all function declarations with external linkage refer to the same function)
-    Scope *globalScope = FuncScope;
-    while (globalScope->getParentScope() != nullptr) {
-        globalScope = globalScope->getParentScope();
-    }
-
-    // Check if we're at block scope (inside a function)
-    bool isBlockScope = (FuncScope != globalScope);
+    // Check if we're at block scope (inside a function, not at file-scope)
+    bool isBlockScope = (FuncScope->getParentScope() != nullptr);
 
     // Static function declarations at block scope are not allowed in C
     if (isBlockScope && storageClass == StorageClass::SC_Static && !avoid_errors) {
@@ -486,17 +480,17 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         }
     }
 
-    // Check global scope for existing variable with same name
+    // Check GlobalSymbolTable for existing variable with same name
     // (function cannot redeclare a file-scope variable)
-    VarDeclaration *existingVar = globalScope->lookupForVar(Name);
+    VarDeclaration *existingVar = GlobalSymbolTable->lookupForVar(Name);
     if (existingVar && !avoid_errors) {
         Diags.report(Loc, diag::err_variable_redeclared_as_function, Name);
         return nullptr;
     }
 
-    // Check global scope for existing function declaration
+    // Check GlobalSymbolTable for existing function declaration
     // (catches conflicts between block-scope declarations in different functions)
-    FunctionDeclaration *existing = globalScope->lookupForFunction(Name);
+    FunctionDeclaration *existing = GlobalSymbolTable->lookupForFunction(Name);
     if (existing) {
         // Check argument count matches
         if (existing->getArgs().size() != args.size() && !avoid_errors) {
@@ -505,7 +499,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         }
 
         // Check linkage compatibility: "static follows non-static" is an error
-        const SymbolEntry *oldEntry = globalScope->lookupEntry(Name);
+        const SymbolEntry *oldEntry = GlobalSymbolTable->lookupEntry(Name);
         bool oldIsGlobal = oldEntry && oldEntry->isGlobal();
         bool newIsStatic = (storageClass == StorageClass::SC_Static);
 
@@ -514,8 +508,8 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
             return nullptr;
         }
 
-        // Also insert into local scope if different (for name lookup in this scope)
-        if (FuncScope != globalScope) {
+        // Also insert into local scope if at block scope (for name lookup in this scope)
+        if (isBlockScope) {
             FuncScope->addDeclaredIdentifier(Name);
             FuncScope->insert(existing, computeLinkage(storageClass, scope), scope);
         }
@@ -531,12 +525,12 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         func->setStorageClass(storageClass.value());
     }
 
-    // Insert into global scope (for cross-function visibility)
-    globalScope->addDeclaredIdentifier(Name);
-    globalScope->insert(func, computeLinkage(storageClass, scope), scope);
+    // Insert into GlobalSymbolTable (for IR generation and cross-function visibility)
+    GlobalSymbolTable->addDeclaredIdentifier(Name);
+    GlobalSymbolTable->insert(func, computeLinkage(storageClass, scope), scope);
 
-    // Also insert into local scope if different (for local variable conflict detection)
-    if (FuncScope != globalScope) {
+    // Also insert into local scope if at block scope (for local variable conflict detection)
+    if (isBlockScope) {
         FuncScope->insert(func, computeLinkage(storageClass, scope), scope);
     }
 
@@ -632,14 +626,9 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
             }
         }
 
-        // Step 2: Look at FILE/GLOBAL SCOPE for existing declaration with linkage
+        // Step 2: Look at GlobalSymbolTable for existing declaration with linkage
         // (extern at block scope should refer to file-scope, not local vars in outer scopes)
-        Scope *globalScope = CurrentScope;
-        while (globalScope->getParentScope() != nullptr) {
-            globalScope = globalScope->getParentScope();
-        }
-
-        const SymbolEntry *globalEntry = globalScope->lookupEntry(Name);
+        const SymbolEntry *globalEntry = GlobalSymbolTable->lookupEntry(Name);
         if (globalEntry != nullptr) {
             if (globalEntry->isFunction() && !avoid_errors) {
                 Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
@@ -660,12 +649,18 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
         StaticAttr attrs{InitialValue::NoInitializer, std::nullopt, true};
         CurrentScope->updateSymbolEntry(Name, attrs);
     } else if (storageClass == StorageClass::SC_Static) {
-        // Static local - add with StaticAttr, init will be validated later
+        // Static local - add to CurrentScope for local name lookup
         CurrentScope->insert(Name, decl, Linkage::Static, ScopeType::Local);
         CurrentScope->addDeclaredIdentifier(Name);
         // Temporarily set Initial(0), will be updated in actOnVarDeclarationInit
         StaticAttr attrs{InitialValue::Initial, 0, false};
         CurrentScope->updateSymbolEntry(Name, attrs);
+
+        // Also add to GlobalSymbolTable with unique name for IR generation
+        // Static locals are "moved to top level" with unique names like "functionName.varName"
+        std::string uniqueName = CurrentFunctionName + "." + Name.str();
+        GlobalSymbolTable->insert(uniqueName, decl, Linkage::Static, ScopeType::Global);
+        GlobalSymbolTable->updateSymbolEntry(uniqueName, attrs);
     } else {
         // Regular local variable (automatic storage)
         CurrentScope->insert(Name, decl, Linkage::None, ScopeType::Local);
@@ -731,6 +726,10 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
         // Update the symbol entry with the actual initial value
         StaticAttr attrs{initialValue, constantValue, false};
         CurrentScope->updateSymbolEntry(Name, attrs);
+
+        // Also update GlobalSymbolTable with the unique name
+        std::string uniqueName = CurrentFunctionName + "." + Name.str();
+        GlobalSymbolTable->updateSymbolEntry(uniqueName, attrs);
     }
 
     // Set the expression on the declaration
@@ -778,6 +777,12 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
     if (!global && BlockScopeExternLinkage.contains(Name.str()) && !avoid_errors) {
         // File-scope static conflicts with prior block-scope extern (which has external linkage)
         Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+        return nullptr;
+    }
+
+    // Check for conflict with previously declared function
+    if (GlobalSymbolTable->lookupForFunction(Name) && !avoid_errors) {
+        Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
         return nullptr;
     }
 
@@ -835,6 +840,7 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
         // Update the existing symbol entry with merged attributes
         StaticAttr newAttrs{initialValue, constantValue, global};
         CurrentScope->updateSymbolEntry(Name, newAttrs);
+        GlobalSymbolTable->updateSymbolEntry(Name, newAttrs);
 
         // Return the existing variable declaration (don't create a new one)
         VarDeclaration *existingDecl = CurrentScope->lookupForVar(Name);
@@ -854,11 +860,14 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
     StaticAttr attrs{initialValue, constantValue, global};
     Linkage linkage = global ? Linkage::External : Linkage::Static;
 
+    // Add to CurrentScope (for scope chain lookups)
     CurrentScope->insert(Name, decl, linkage, ScopeType::Global);
     CurrentScope->addDeclaredIdentifier(Name);
-
-    // Update the symbol entry with the correct StaticAttr (overwrite the one created by insert)
     CurrentScope->updateSymbolEntry(Name, attrs);
+
+    // Also add to GlobalSymbolTable (for IR generation)
+    GlobalSymbolTable->insert(Name, decl, linkage, ScopeType::Global);
+    GlobalSymbolTable->updateSymbolEntry(Name, attrs);
 
     return decl;
 }
@@ -1037,6 +1046,14 @@ ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Exp
  */
 FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const {
     FunctionDeclaration *func = CurrentScope->lookupForFunction(name);
+    if (!func) {
+        if (CurrentScope->lookupForVar(name) && !avoid_errors) {
+            Diags.report(Loc, diag::err_definition_used_as_function, name);
+            return nullptr;
+        }
+        func = GlobalSymbolTable->lookupForFunction(name);
+    }
+
     if (func != nullptr) {
         if (func->getArgs().size() != args.size() && !avoid_errors) {
             Diags.report(Loc, diag::err_wrong_argument_call, name, args.size(), func->getArgs().size());

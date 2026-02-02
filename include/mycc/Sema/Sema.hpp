@@ -27,8 +27,12 @@ namespace mycc {
 
         DiagnosticsEngine &Diags;
         ASTContext &Context;
+        Scope *GlobalSymbolTable;  // Collects all top-level definitions for IR generation
         Scope *CurrentScope;
         bool avoid_errors = false;
+
+        // Current function name for generating unique static local names
+        std::string CurrentFunctionName;
 
         // Track identifiers that have been given external linkage via block-scope extern.
         // This is separate from scope visibility - used to detect conflicts with
@@ -161,8 +165,12 @@ namespace mycc {
          * @param Diags Diagnostics engine for error reporting.
          * @param Context AST context for creating AST nodes.
          */
-        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context), CurrentScope(nullptr) {
+        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context), GlobalSymbolTable(nullptr), CurrentScope(nullptr) {
             initialize();
+        }
+
+        ~Sema() {
+            delete GlobalSymbolTable;
         }
 
         /**
@@ -176,6 +184,10 @@ namespace mycc {
             return avoid_errors;
         }
 
+        [[nodiscard]] const Scope& getGlobalSymbolTable() const {
+            return *GlobalSymbolTable;
+        }
+
         /**
          * @brief Initialize semantic analysis state.
          */
@@ -183,8 +195,9 @@ namespace mycc {
 
         /**
          * @brief Enter a new function scope, clearing function-level state.
+         * @param name The function name (used for generating unique static local names).
          */
-        void enterFunction();
+        void enterFunction(StringRef name);
 
         /**
          * @brief Exit function scope and validate goto labels.
@@ -221,7 +234,7 @@ namespace mycc {
          * @param args Function parameters.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass) const;
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.

@@ -259,8 +259,8 @@ if (isBlockScope && storageClass == StorageClass::SC_Static) {
     fail("static function at block scope");
 }
 
-// Check for variable/function name conflict
-if (globalScope->lookupForVar(Name) != nullptr) {
+// Check for variable/function name conflict in GlobalSymbolTable
+if (GlobalSymbolTable->lookupForVar(Name) != nullptr) {
     fail("variable redeclared as function");
 }
 
@@ -268,6 +268,32 @@ if (globalScope->lookupForVar(Name) != nullptr) {
 if (existing && oldIsGlobal && newIsStatic) {
     fail("static follows non-static");
 }
+```
+
+### Function Declaration Flow
+
+```
+actOnFunctionDeclaration(name, args, storageClass)
+    |
+    +-- Determine if at block scope (FuncScope->getParentScope() != nullptr)
+    |
+    +-- If block-scope static: ERROR
+    |
+    +-- Check local scope for conflict with local variable
+    |
+    +-- Check GlobalSymbolTable for existing variable with same name
+    |       +-- If variable exists: ERROR (variable redeclared as function)
+    |
+    +-- Check GlobalSymbolTable for existing function declaration
+    |       +-- If exists: verify argument count matches
+    |       +-- Check linkage compatibility (static follows non-static)
+    |       +-- If at block scope: also add to local scope
+    |       +-- Return existing function
+    |
+    +-- First declaration:
+            +-- Create FunctionDeclaration
+            +-- Add to GlobalSymbolTable
+            +-- If at block scope: also add to local scope
 ```
 
 ## Declaration Processing Flow
@@ -283,12 +309,13 @@ actOnVarDeclaration(name, storageClass)
     |
     +-- If extern:
     |       +-- Check current scope for local/static conflict
-    |       +-- Look up in global scope
+    |       +-- Look up in GlobalSymbolTable for existing declaration
     |       +-- If not found: add to BlockScopeExternLinkage
     |       +-- Add to current scope (visibility only)
     |
     +-- If static:
-    |       +-- Add to current scope with StaticAttr
+    |       +-- Add to current scope with StaticAttr (original name)
+    |       +-- Add to GlobalSymbolTable with unique name (functionName.varName)
     |
     +-- Otherwise:
             +-- Add to current scope with LocalAttr
@@ -298,6 +325,8 @@ actOnVarDeclarationInit(decl, initExpr)
     +-- If extern: no initializer allowed
     |
     +-- If static: must be constant expression
+    |       +-- Update CurrentScope with actual value
+    |       +-- Update GlobalSymbolTable (unique name) with actual value
     |
     +-- Set expression on declaration
 ```
@@ -313,12 +342,16 @@ actOnGlobalVarDeclaration(name, initExpr, storageClass)
     |
     +-- Check BlockScopeExternLinkage for conflicts
     |
-    +-- Look up existing declaration
+    +-- Check GlobalSymbolTable for function with same name
+    |       +-- If function exists: ERROR (function redeclared as variable)
+    |
+    +-- Look up existing declaration in CurrentScope
     |       |
     |       +-- If function: ERROR
     |       +-- If variable: merge attributes
     |
-    +-- Add/update symbol table
+    +-- Add/update CurrentScope (for scope chain lookup)
+    +-- Add/update GlobalSymbolTable (for IR generation)
 ```
 
 ## Error Conditions
@@ -333,11 +366,124 @@ actOnGlobalVarDeclaration(name, initExpr, storageClass)
 | Extern with initializer | Block-scope extern has initializer |
 | Static block-scope function | Function declaration with static at block scope |
 
-## Future Improvements
+## Global Symbol Table
 
-The current implementation mixes scope and symbol table concerns in the `Scope` class. A cleaner architecture would separate:
+A `GlobalSymbolTable` has been implemented to separate concerns between name visibility (scope chain) and symbol identity for IR generation.
 
-1. **Scope Chain** - Pure visibility/name lookup
-2. **Symbol Table** - Global registry of all identifiers with linkage and their attributes
+### Architecture
 
-This would eliminate workarounds like `BlockScopeExternLinkage` and simplify the code for handling complex linkage scenarios.
+```
+┌─────────────────────────────────────────────────────────────┐
+│ GlobalSymbolTable                                           │
+│ - Single Scope instance, separate from the scope chain      │
+│ - Tracks ALL identifiers needed for IR generation:          │
+│   • File-scope variables (with original names)              │
+│   • File-scope functions (with original names)              │
+│   • Static local variables (with unique names)              │
+│ - NOT used for name lookup during semantic analysis         │
+│ - Used by IRGenerator to create StaticVariable entries      │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            │ separate from
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Scope Chain                                                 │
+│ - Hierarchical structure for name visibility                │
+│ - Each scope contains names visible at that level           │
+│ - Used for variable/function lookup during parsing          │
+│ - Local variables stored with original names                │
+│ - Static locals stored with original names (for lookup)     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Details
+
+The `GlobalSymbolTable` is a separate `Scope` instance in `Sema`:
+
+```cpp
+class Sema {
+    Scope *GlobalSymbolTable;  // Separate table for IR generation
+    Scope *CurrentScope;        // Scope chain for name lookup
+    std::string CurrentFunctionName;  // For unique static local names
+    // ...
+};
+```
+
+### Static Local Variable Naming
+
+Static local variables are stored in `GlobalSymbolTable` with unique names to avoid collisions:
+
+```
+Format: functionName.variableName
+
+Example:
+  void foo(void) {
+      static int x = 5;  // Stored as "foo.x" in GlobalSymbolTable
+  }
+  void bar(void) {
+      static int x = 10; // Stored as "bar.x" in GlobalSymbolTable
+  }
+```
+
+### Symbol Addition Flow
+
+**File-scope variables** (`actOnGlobalVarDeclaration`):
+- Added to `CurrentScope` (file scope) with original name
+- Added to `GlobalSymbolTable` with original name
+
+**File-scope functions** (`actOnFunctionDeclaration`):
+- Added to `GlobalSymbolTable` with original name
+- Also added to local scope if declared at block scope
+
+**Static local variables** (`actOnVarDeclaration` with `SC_Static`):
+- Added to `CurrentScope` with original name (for local lookup)
+- Added to `GlobalSymbolTable` with unique name `functionName.varName`
+
+**Extern local variables** (`actOnVarDeclaration` with `SC_Extern`):
+- Added to `CurrentScope` for local lookup
+- Lookups check `GlobalSymbolTable` for existing file-scope declaration
+
+### IR Generation Usage
+
+The `IRGenerator` receives `GlobalSymbolTable` and uses it to:
+
+1. **Create `StaticVariable` entries** via `convertSymbolsToTacky()`:
+   - Iterates all symbols with `StaticAttr`
+   - Creates IR `StaticVariable` for each (with `Initial` or `Tentative` init)
+   - Skips `NoInitializer` (extern declarations)
+
+2. **Generate variable references** via `generateVarExpression()`:
+   - Looks up original name for file-scope statics
+   - Looks up `functionName.varName` for static locals
+   - Uses `VarOp` for regular local variables
+
+```cpp
+ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFunc) {
+    StringRef originalName = var.getName();
+
+    // Check for file-scope static (stored with original name)
+    if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
+        if (entry->isStaticAttr()) {
+            return Ctx.getOrCreateStaticVar(originalName);
+        }
+    }
+
+    // Check for static local (stored with unique name)
+    std::string uniqueName = CurrentFunctionName + "." + originalName.str();
+    if (const SymbolEntry* entry = Symbols->lookupEntry(uniqueName)) {
+        if (entry->isStaticAttr()) {
+            return Ctx.getOrCreateStaticVar(uniqueName);
+        }
+    }
+
+    // Local variable - use renamed name for SSA
+    return Ctx.getOrCreateVar(getIRName(originalName));
+}
+```
+
+### Benefits
+
+1. **Clean separation** - Scope chain for visibility, GlobalSymbolTable for IR generation
+2. **Simpler function declarations** - No need to walk up scope chain to find global scope
+3. **Unique static local names** - Automatic collision avoidance with `functionName.varName` format
+4. **Direct IR generation** - `convertSymbolsToTacky` iterates GlobalSymbolTable directly

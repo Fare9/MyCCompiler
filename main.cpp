@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
                 std::cerr << "compilation terminated.\n";
                 return 3;
             }
-            irGen.generateIR(*p);
+            irGen.generateIR(*p, Sema.getGlobalSymbolTable());
             if (print_output) {
                 std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
                 std::cerr << "compilation terminated.\n";
                 return 3;
             }
-            irGen.generateIR(*p);
+            irGen.generateIR(*p, Sema.getGlobalSymbolTable());
             if (print_output) {
                 std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
                 std::cerr << "compilation terminated.\n";
                 return 3;
             }
-            irGen.generateIR(*p);
+            irGen.generateIR(*p, Sema.getGlobalSymbolTable());
             if (print_output) {
                 std::cout << "IR output:\n" << Program.to_string() << std::endl;
             }
