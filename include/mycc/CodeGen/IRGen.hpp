@@ -4,6 +4,8 @@
 #include "mycc/Sema/Scope.hpp"
 #include "mycc/IR/SimpleIR.hpp"
 
+#include <set>
+
 
 namespace mycc::codegen {
 
@@ -18,6 +20,9 @@ class IRGenerator {
     // Variable renaming for SSA-style naming
     unsigned int VariableCounter = 0;
     StringMap<std::vector<std::string>> VariableRenameStack;
+
+    // Track extern variables declared at block scope (refer to globals defined elsewhere)
+    std::set<std::string> ExternVariables;
 
     struct CaseInfo {
         Expr * value;

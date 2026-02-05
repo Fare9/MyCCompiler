@@ -85,7 +85,7 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
 
     // Now create the IR function with the parameters
     ir::InstList instructions;
-    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args);
+    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args, ASTFunc.isGlobal());
 
     bool containsReturn = false;
 
@@ -198,6 +198,29 @@ void IRGenerator::generateStatement(const Statement &Stmt, ir::Function *IRFunc)
 void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *IRFunc) {
     const auto *left = Decl.getVar();
     StringRef originalName = left->getName();
+
+    // For extern declarations at block scope, map to the global variable name
+    // (no unique name, no initialization - it refers to a global defined elsewhere)
+    if (Decl.getStorageClass().has_value() &&
+        Decl.getStorageClass().value() == StorageClass::SC_Extern) {
+        // Push the original name (global variable) onto the rename stack
+        VariableRenameStack[originalName].push_back(originalName.str());
+        // Track this as an extern variable (refers to global defined elsewhere)
+        ExternVariables.insert(originalName.str());
+        return;
+    }
+
+    // For static local declarations, use the unique name stored in the declaration
+    // Static locals are initialized at compile time (in data segment), not at runtime
+    if (Decl.getStorageClass().has_value() &&
+        Decl.getStorageClass().value() == StorageClass::SC_Static) {
+        if (Decl.getUniqueName().has_value()) {
+            // Push the global unique name onto the rename stack
+            VariableRenameStack[originalName].push_back(Decl.getUniqueName().value());
+        }
+        // Don't generate copy instruction - initialization is in data segment
+        return;
+    }
 
     // Generate unique name for this variable
     std::string uniqueName = generateUniqueVarName(originalName);
@@ -498,27 +521,40 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
 ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFunc) {
     StringRef originalName = var.getName();
 
-    if (Symbols) {
-        // Check for file-scope static variable (stored with original name)
-        if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
-            if (entry->isStaticAttr()) {
-                // File-scope static - use original name
-                return Ctx.getOrCreateStaticVar(originalName);
-            }
+    // First check the rename stack to get the current binding for this name
+    std::string irName = getIRName(originalName);
+
+    // If the IR name equals the original name, it might be a global/static variable
+    // (either because there's no local, or because an extern declaration is in scope)
+    if (irName == originalName.str()) {
+        // Check if it's a known extern variable (defined in another translation unit)
+        if (ExternVariables.count(irName)) {
+            return Ctx.getOrCreateStaticVar(originalName);
         }
 
-        // Check for static local variable (stored with unique name: functionName.varName)
-        std::string uniqueName = CurrentFunctionName + "." + originalName.str();
-        if (const SymbolEntry* entry = Symbols->lookupEntry(uniqueName)) {
-            if (entry->isStaticAttr()) {
-                // Static local - use unique name
-                return Ctx.getOrCreateStaticVar(uniqueName);
+        // Check for file-scope static variable (stored with original name)
+        if (Symbols) {
+            if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
+                if (entry->isStaticAttr()) {
+                    // File-scope static - use original name
+                    return Ctx.getOrCreateStaticVar(originalName);
+                }
             }
         }
     }
 
-    // Local variable - use renamed name
-    std::string irName = getIRName(originalName);
+    // Check if irName is a static local variable (from rename stack)
+    // Static locals have unique names like "functionName.varName" or "functionName.varName.1"
+    if (Symbols) {
+        if (const SymbolEntry* entry = Symbols->lookupEntry(irName)) {
+            if (entry->isStaticAttr()) {
+                // Static local - use the unique name from rename stack
+                return Ctx.getOrCreateStaticVar(irName);
+            }
+        }
+    }
+
+    // Local variable - use renamed name from the stack
     return Ctx.getOrCreateVar(irName);
 }
 

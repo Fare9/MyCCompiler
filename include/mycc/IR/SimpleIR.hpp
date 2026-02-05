@@ -810,7 +810,8 @@ namespace mycc::ir {
         }
 
         [[nodiscard]] std::string to_string() const {
-            std::string result = "define " + get_name().str() + "(";
+            std::string global_str = global ? ".global" : "";
+            std::string result = "define " + global_str + " " + get_name().str() + "(";
             for (auto *arg: args) {
                 result += arg->to_string() + ",";
             }

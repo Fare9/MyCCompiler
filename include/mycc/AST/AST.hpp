@@ -839,6 +839,8 @@ namespace mycc {
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
         std::optional<StorageClass> storageClass;
+        // For static local variables, stores the unique global name (e.g., "func.var.1")
+        std::optional<std::string> uniqueName;
 
     public:
         VarDeclaration(const SMLoc Loc, Var *Name) : Loc(Loc), Name(Name) {
@@ -871,6 +873,14 @@ namespace mycc {
 
         void setStorageClass(StorageClass sc) {
             storageClass = sc;
+        }
+
+        [[nodiscard]] const std::optional<std::string>& getUniqueName() const {
+            return uniqueName;
+        }
+
+        void setUniqueName(const std::string& name) {
+            uniqueName = name;
         }
     };
 
@@ -960,6 +970,11 @@ namespace mycc {
 
         void setStorageClass(StorageClass sc) {
             storageClass = sc;
+        }
+
+        /// Returns true if the function has external linkage (is NOT static)
+        [[nodiscard]] bool isGlobal() const {
+            return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
         }
     };
 

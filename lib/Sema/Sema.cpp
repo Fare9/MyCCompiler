@@ -658,7 +658,17 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
 
         // Also add to GlobalSymbolTable with unique name for IR generation
         // Static locals are "moved to top level" with unique names like "functionName.varName"
-        std::string uniqueName = CurrentFunctionName + "." + Name.str();
+        // If there's already a static local with the same base name, append a counter
+        std::string baseName = CurrentFunctionName + "." + Name.str();
+        std::string uniqueName = baseName;
+        int counter = 1;
+        while (GlobalSymbolTable->hasSymbolInCurrentScope(uniqueName)) {
+            uniqueName = baseName + "." + std::to_string(counter++);
+        }
+
+        // Store the unique name in the declaration so IRGen can find it
+        decl->setUniqueName(uniqueName);
+
         GlobalSymbolTable->insert(uniqueName, decl, Linkage::Static, ScopeType::Global);
         GlobalSymbolTable->updateSymbolEntry(uniqueName, attrs);
     } else {
@@ -727,9 +737,10 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
         StaticAttr attrs{initialValue, constantValue, false};
         CurrentScope->updateSymbolEntry(Name, attrs);
 
-        // Also update GlobalSymbolTable with the unique name
-        std::string uniqueName = CurrentFunctionName + "." + Name.str();
-        GlobalSymbolTable->updateSymbolEntry(uniqueName, attrs);
+        // Also update GlobalSymbolTable with the unique name (stored in declaration)
+        if (decl->getUniqueName().has_value()) {
+            GlobalSymbolTable->updateSymbolEntry(decl->getUniqueName().value(), attrs);
+        }
     }
 
     // Set the expression on the declaration

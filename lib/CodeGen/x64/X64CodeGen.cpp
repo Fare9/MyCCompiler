@@ -37,6 +37,11 @@ namespace mycc::codegen::x64 {
     void X64CodeGenerator::generateProgram(const ir::Program &IRProg) {
         Program = std::make_unique<X64Program>();
 
+        for (const auto *IRStaticVar : IRProg.getStaticVars()) {
+            auto *staticVar = new X64StaticVar(IRStaticVar->getName(), IRStaticVar->isGlobal(), IRStaticVar->getInitialValue());
+            Program->add_static_var(staticVar);
+        }
+
         for (const auto *IRFunc: IRProg) {
             // Skip external functions (functions without bodies)
             if (IRFunc->empty()) {
@@ -44,7 +49,7 @@ namespace mycc::codegen::x64 {
                 continue;
             }
 
-            auto *X64Func = new X64Function(IRFunc->get_name());
+            auto *X64Func = new X64Function(IRFunc->get_name(), IRFunc->isGlobal());
             Program->add_function(X64Func);
             generateFunction(*IRFunc, X64Func);
         }
@@ -456,6 +461,8 @@ namespace mycc::codegen::x64 {
             return convertVariable(*Var, Ctx);
         if (const auto *Param = dynamic_cast<const ir::ParameterOp *>(Val))
             return convertParameter(*Param, Ctx);
+        if (const auto *StaticVar = dynamic_cast<const ir::StaticVarOp *>(Val))
+            return convertStaticVar(*StaticVar, Ctx);
         return nullptr;
     }
 
@@ -477,6 +484,10 @@ namespace mycc::codegen::x64 {
     X64Register *X64CodeGenerator::convertParameter(const ir::ParameterOp &Var, X64Context &Ctx) {
         unsigned pseudoID = std::hash<std::string>{}(Var.getName());
         return Ctx.getPseudoReg(pseudoID);
+    }
+
+    X64Data* X64CodeGenerator::convertStaticVar(const ir::StaticVarOp& Var, X64Context& Ctx) {
+        return Ctx.createData(Var.getName());
     }
 
     // ===== Phase 2: Stack Allocation =====
@@ -575,6 +586,11 @@ namespace mycc::codegen::x64 {
         }
     }
 
+    // Helper to check if an operand is a memory address (X64Stack or X64Data)
+    static bool isMemoryOperand(X64Operand *op) {
+        return dynamic_cast<X64Stack *>(op) != nullptr || dynamic_cast<X64Data *>(op) != nullptr;
+    }
+
     void X64CodeGenerator::fixupInstructionsForFunction(X64Function *Func) {
         auto &Ctx = Func->getContext();
 
@@ -583,14 +599,14 @@ namespace mycc::codegen::x64 {
 
         for (auto *Inst: *Func) {
             if (auto *mov = dynamic_cast<X64Mov *>(Inst)) {
-                // Check for MEM to MEM move (both operands are X64Stack)
+                // Check for MEM to MEM move (both operands are memory: X64Stack or X64Data)
                 X64Operand *src = mov->getSrc();
                 X64Operand *dst = mov->getDst();
-                auto *srcStack = dynamic_cast<X64Stack *>(src);
-                auto *dstStack = dynamic_cast<X64Stack *>(dst);
+                bool srcIsMem = isMemoryOperand(src);
+                bool dstIsMem = isMemoryOperand(dst);
 
                 // If both source and destination are memory, we need to fix this
-                if (srcStack != nullptr && dstStack != nullptr) {
+                if (srcIsMem && dstIsMem) {
                     // Use R10D as intermediate register
                     auto *R10D =
                             Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
@@ -599,21 +615,22 @@ namespace mycc::codegen::x64 {
                     // 1. MOV R10D, [src_memory]
                     // 2. MOV [dst_memory], R10D
                     std::vector<X64Instruction *> newInstructions;
-                    newInstructions.push_back(Ctx.createMov(srcStack, R10D));
-                    newInstructions.push_back(Ctx.createMov(R10D, dstStack));
+                    newInstructions.push_back(Ctx.createMov(src, R10D));
+                    newInstructions.push_back(Ctx.createMov(R10D, dst));
 
                     // Mark this instruction for replacement
                     replacements.emplace_back(mov, std::move(newInstructions));
                 }
             } else if (auto *binOp = dynamic_cast<X64Binary *>(Inst)) {
-                // Check for MEM to MEM move (both operands are X64Stack)
+                // Check for MEM to MEM operation (both operands are memory: X64Stack or X64Data)
                 X64Operand *src = binOp->getSrc();
                 X64Operand *dst = binOp->getDst();
                 auto *srcStack = dynamic_cast<X64Stack *>(src);
-                auto *dstStack = dynamic_cast<X64Stack *>(dst);
+                bool srcIsMem = isMemoryOperand(src);
+                bool dstIsMem = isMemoryOperand(dst);
 
                 // If both source and destination are memory, we need to fix this
-                if (srcStack != nullptr && dstStack != nullptr) {
+                if (srcIsMem && dstIsMem) {
                     // Use R10D as intermediate register
                     auto *R10D =
                             Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
@@ -626,11 +643,16 @@ namespace mycc::codegen::x64 {
                     std::vector<X64Instruction *> newInstructions;
                     // SAL/SAR shift count must be in CL register
                     if (binOp->getKind() == X64Binary::Sal || binOp->getKind() == X64Binary::Sar) {
-                        auto *srcStackByte = Ctx.getAllocatedStack(srcStack, X64Stack::Size::BYTE);
-                        newInstructions.push_back(Ctx.createMov(srcStackByte, CL));
+                        // For X64Stack we can get byte-sized access, for X64Data just move to CL
+                        if (srcStack) {
+                            auto *srcStackByte = Ctx.getAllocatedStack(srcStack, X64Stack::Size::BYTE);
+                            newInstructions.push_back(Ctx.createMov(srcStackByte, CL));
+                        } else {
+                            newInstructions.push_back(Ctx.createMov(src, CL));
+                        }
                         srcRegister = CL;
                     } else {
-                        newInstructions.push_back(Ctx.createMov(srcStack, R10D));
+                        newInstructions.push_back(Ctx.createMov(src, R10D));
                         srcRegister = R10D;
                     }
                     // the destination for a Mul cannot be a memory address, so in case we have
@@ -640,21 +662,21 @@ namespace mycc::codegen::x64 {
                                                     PhysicalRegister::Size::DWORD);
                         newInstructions.push_back(Ctx.createMov(dst, R11D));
                         newInstructions.push_back(Ctx.createBinary(binOp->getKind(), srcRegister, R11D));
-                        newInstructions.push_back(Ctx.createMov(R11D, dstStack));
+                        newInstructions.push_back(Ctx.createMov(R11D, dst));
                     } else {
-                        newInstructions.push_back(Ctx.createBinary(binOp->getKind(), srcRegister, dstStack));
+                        newInstructions.push_back(Ctx.createBinary(binOp->getKind(), srcRegister, dst));
                     }
                     // Mark this instruction for replacement
                     replacements.emplace_back(binOp, std::move(newInstructions));
                 }
                 // Same as before, but in this case, we can have that source is an immediate value
                 // and destination is a memory address
-                else if (dstStack != nullptr && binOp->getKind() == X64Binary::Mult) {
+                else if (dstIsMem && binOp->getKind() == X64Binary::Mult) {
                     std::vector<X64Instruction *> newInstructions;
                     auto *R11D = Ctx.getPhysReg(PhysicalRegister::PhysReg::R11, PhysicalRegister::Size::DWORD);
                     newInstructions.push_back(Ctx.createMov(dst, R11D));
                     newInstructions.push_back(Ctx.createBinary(binOp->getKind(), src, R11D));
-                    newInstructions.push_back(Ctx.createMov(R11D, dstStack));
+                    newInstructions.push_back(Ctx.createMov(R11D, dst));
                     replacements.emplace_back(binOp, std::move(newInstructions));
                 }
                 // Handle SAL/SAR where shift count is not immediate and not in CL
@@ -690,18 +712,21 @@ namespace mycc::codegen::x64 {
             } else if (auto *cmp = dynamic_cast<X64Cmp *>(Inst)) {
                 X64Operand *left = cmp->getLeft();
                 X64Operand *right = cmp->getRight();
-                auto *leftStack = dynamic_cast<X64Stack *>(left);
                 auto *leftImm = dynamic_cast<X64Int *>(left);
-                auto *rightStack = dynamic_cast<X64Stack *>(right);
+                auto *rightImm = dynamic_cast<X64Int *>(right);
+                bool leftIsMem = isMemoryOperand(left);
+                bool rightIsMem = isMemoryOperand(right);
+                // Check if left is X64Data (RIP-relative memory)
+                auto *leftData = dynamic_cast<X64Data *>(left);
 
-                // in a CMP instruction both operands cannot be stack operators
-                if (leftStack != nullptr && rightStack != nullptr) {
+                // in a CMP instruction both operands cannot be memory operands
+                if (leftIsMem && rightIsMem) {
                     // Use R10D as intermediate register
                     auto *R10D =
                             Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
                     std::vector<X64Instruction *> newInstructions;
-                    newInstructions.push_back(Ctx.createMov(leftStack, R10D));
-                    newInstructions.push_back(Ctx.createCmp(R10D, rightStack));
+                    newInstructions.push_back(Ctx.createMov(left, R10D));
+                    newInstructions.push_back(Ctx.createCmp(R10D, right));
 
                     replacements.emplace_back(cmp, std::move(newInstructions));
                 }
@@ -715,6 +740,16 @@ namespace mycc::codegen::x64 {
                     std::vector<X64Instruction *> newInstructions;
                     newInstructions.push_back(Ctx.createMov(leftImm, R11D));
                     newInstructions.push_back(Ctx.createCmp(R11D, right));
+
+                    replacements.emplace_back(cmp, std::move(newInstructions));
+                }
+                // cmp [X64Data], imm has ambiguous size - move data to register first
+                else if (leftData != nullptr && rightImm != nullptr) {
+                    auto *R10D =
+                            Ctx.getPhysReg(PhysicalRegister::PhysReg::R10, PhysicalRegister::Size::DWORD);
+                    std::vector<X64Instruction *> newInstructions;
+                    newInstructions.push_back(Ctx.createMov(leftData, R10D));
+                    newInstructions.push_back(Ctx.createCmp(R10D, rightImm));
 
                     replacements.emplace_back(cmp, std::move(newInstructions));
                 }
@@ -778,12 +813,15 @@ namespace mycc::codegen::x64 {
     // ===== Phase 5: Assembly Generation =====
 
     std::string X64CodeGenerator::emitAssembly() {
-        // TODO: Generate final assembly string
         std::ostringstream asm_output;
 
         // Emit assembly header/directives
         asm_output << formatDirective(".intel_syntax noprefix") << "\n";
-        asm_output << formatDirective(".text") << "\n\n";
+
+        // Emit static variables
+        for (auto it = Program->staticVars_begin(); it != Program->staticVars_end(); ++it) {
+            asm_output << emitStaticVar(**it) << "\n";
+        }
 
         // Emit each function
         for (const auto &Func: *Program) {
@@ -797,12 +835,42 @@ namespace mycc::codegen::x64 {
         return asm_output.str();
     }
 
+    std::string X64CodeGenerator::emitStaticVar(const X64StaticVar &StaticVar) {
+        std::ostringstream var_output;
+
+        if (StaticVar.isGlobal()) {
+            var_output << formatDirective(".globl " + StaticVar.getName().str()) << "\n";
+        }
+
+        if (StaticVar.getInitValue() != 0) {
+            // Non-zero init: use .data section
+            var_output << formatDirective(".data") << "\n";
+            var_output << formatDirective(".align 4") << "\n";
+            var_output << StaticVar.getName().str() << ":\n";
+            var_output << formatDirective(".long " + std::to_string(StaticVar.getInitValue())) << "\n";
+        } else {
+            // Zero init: use .bss section
+            var_output << formatDirective(".bss") << "\n";
+            var_output << formatDirective(".align 4") << "\n";
+            var_output << StaticVar.getName().str() << ":\n";
+            var_output << formatDirective(".zero 4") << "\n";
+        }
+
+        return var_output.str();
+    }
+
     std::string X64CodeGenerator::emitFunction(const X64Function &Func) {
-        // TODO: Emit single function assembly
         std::ostringstream func_output;
 
+        // Text section directive
+        func_output << formatDirective(".text") << "\n";
+
+        // Global directive only if function is global
+        if (Func.isGlobal()) {
+            func_output << formatDirective(".globl " + Func.get_name().str()) << "\n";
+        }
+
         // Function label
-        func_output << formatDirective(".global " + Func.get_name().str() + "\n");
         func_output << formatLabel(Func.get_name()) << "\n";
 
         func_output << "    push rbp" << "\n";
