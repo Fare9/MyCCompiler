@@ -55,6 +55,7 @@ private:
     X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
     X64Register* convertVariable(const ir::VarOp& Var, X64Context& Ctx);
     X64Register* convertParameter(const ir::ParameterOp& Var, X64Context& Ctx);
+    X64Data* convertStaticVar(const ir::StaticVarOp& Var, X64Context& Ctx);
     
     // Phase 2: Replace pseudo-registers with stack allocations
     void allocateStackSlots();
@@ -71,6 +72,7 @@ private:
     
     // Assembly generation
     std::string emitAssembly();
+    std::string emitStaticVar(const X64StaticVar& StaticVar);
     std::string emitFunction(const X64Function& Func);
     std::string emitInstruction(const X64Instruction& Inst);
     

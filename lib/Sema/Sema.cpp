@@ -10,7 +10,8 @@ using namespace mycc;
  * This method resets the FunctionLabels and GotoLabels sets to prepare
  * for semantic analysis of a new function.
  */
-void Sema::enterFunction() {
+void Sema::enterFunction(StringRef name) {
+    CurrentFunctionName = name.str();
     FunctionLabels.clear();
     GotoLabels.clear();
 }
@@ -21,7 +22,7 @@ void Sema::enterFunction() {
  * After processing a function, this validates that every goto statement
  * references a label that was actually defined in the function.
  */
-void Sema::exitFunction() {
+void Sema::exitFunction() const {
     // Check that all goto labels are defined in the function
     if (!avoid_errors) {
         checkGotoLabelsCorrectlyPointToFunction();
@@ -37,6 +38,20 @@ void Sema::checkGotoLabelsCorrectlyPointToFunction() const {
     }
 }
 
+Linkage Sema::computeLinkage(std::optional<StorageClass> sc, ScopeType scope) {
+    if (scope == ScopeType::Global) {
+        // global var/functions
+        if (sc == StorageClass::SC_Static)
+            return Linkage::Static; // internal linkage
+        return Linkage::External; // extern or nothing specified
+    } else {
+        // a local variable/local definition
+        if (sc == StorageClass::SC_Extern)
+            return Linkage::External;
+        return Linkage::None; // a local definition without storage class, has no linkage.
+    }
+}
+
 void Sema::enterScope() {
     CurrentScope = new Scope(CurrentScope);
 }
@@ -46,13 +61,24 @@ void Sema::exitScope() {
     assert(CurrentScope && "Can't exit non-existing scope");
 
     Scope *Parent = CurrentScope->getParentScope();
-    // delete current scope
     delete CurrentScope;
     CurrentScope = Parent;
 }
 
 std::string Sema::generateLoopLabel() {
     return "loop_" + std::to_string(LoopLabelCounter++);
+}
+
+std::string Sema::generateSwitchLabel() {
+    return "switch_" + std::to_string(SwitchLabelCounter++);
+}
+
+std::string Sema::generateCaseLabel() {
+    return "case_" + std::to_string(CaseLabelCounter++);
+}
+
+std::string Sema::generateDefaultLabel() {
+    return "default_" + std::to_string(DefaultLabelCounter++);
 }
 
 /**
@@ -75,136 +101,16 @@ void Sema::assignLoopLabels(FunctionDeclaration &F) {
     }
 }
 
+/**
+ * @brief From what a block item can be, just analyze those that are statements, this analysis
+ * is used to assign loop labels.
+ *
+ * @param item a block item reference, only handle those that are statements.
+ * @param breakableStack vector containing all the break statements information.
+ */
 void Sema::traverseBlockItem(BlockItem &item, std::vector<BreakableContext> &breakableStack) {
     if (std::holds_alternative<Statement *>(item)) {
         traverseStatement(std::get<Statement *>(item), breakableStack);
-    }
-}
-
-std::string Sema::generateSwitchLabel() {
-    return "switch_" + std::to_string(SwitchLabelCounter++);
-}
-
-std::string Sema::generateCaseLabel() {
-    return "case_" + std::to_string(CaseLabelCounter++);
-}
-
-std::string Sema::generateDefaultLabel() {
-    return "default_" + std::to_string(DefaultLabelCounter++);
-}
-
-bool Sema::isConstantExpression(Expr *expr) {
-    return expr->getKind() == Expr::Ek_Int;
-}
-
-int64_t Sema::evaluateConstantExpression(Expr *expr) {
-    if (auto *intLit = dynamic_cast<IntegerLiteral *>(expr)) {
-        return intLit->getValue().getSExtValue();
-    }
-    // this should never be reached since we only allow constant integers
-    return 0;
-}
-
-/**
- * @brief Validate the body of a switch statement recursively.
- *
- * Performs the following validations:
- * 1. Case values must be constant expressions
- * 2. No duplicate case values
- * 3. At most one default case
- * 4. No variable declarations immediately after case/default labels
- *
- * @param body Switch body statement to validate.
- * @param seenCaseValues Set to track and detect duplicate case values.
- * @param hasDefault Flag indicating if a default case has been seen.
- */
-void Sema::validateSwitchBody(Statement *body,
-                              std::set<int64_t> &seenCaseValues,
-                              bool &hasDefault) {
-    if (!body) return;
-
-    switch (body->getKind()) {
-        case Statement::SK_Case: {
-            auto *caseStmt = dynamic_cast<CaseStatement *>(body);
-
-            // First check, case value must be a constant integer
-            Expr *value = caseStmt->getValue();
-            if (!isConstantExpression(value)) {
-                Diags.report(SMLoc(), diag::err_case_value_not_constant);
-                exit(1);
-            }
-
-            // Second check, look for duplicated cases
-            int64_t caseValue = evaluateConstantExpression(value);
-            if (seenCaseValues.contains(caseValue)) {
-                Diags.report(SMLoc(), diag::err_duplicate_case_value, std::to_string(caseValue));
-                exit(1);
-            }
-            seenCaseValues.insert(caseValue);
-            break;
-        }
-
-        case Statement::SK_Default: {
-            // Check 3: It has multiple defaults
-            if (hasDefault) {
-                Diags.report(SMLoc(), diag::err_multiple_default_in_switch);
-                exit(1);
-            }
-            hasDefault = true;
-            break;
-        }
-
-        case Statement::SK_Compound: {
-            auto *compound = dynamic_cast<CompoundStatement *>(body);
-            Statement *prevStmt = nullptr;
-
-            // Go over each item to validate the body
-            for (auto &item: *compound) {
-                // Check if current item is a Declaration following case/default
-                if (std::holds_alternative<VarDeclaration *>(item)) {
-                    if (prevStmt &&
-                        (prevStmt->getKind() == Statement::SK_Case ||
-                         prevStmt->getKind() == Statement::SK_Default)) {
-                        if (!avoid_errors) {
-                            Diags.report(SMLoc(), diag::err_declaration_after_case_label);
-                            exit(1);
-                        }
-                    }
-                    // Reset prevStmt since a declaration is not a statement
-                    prevStmt = nullptr;
-                } else if (std::holds_alternative<Statement *>(item)) {
-                    Statement *stmt = std::get<Statement *>(item);
-                    validateSwitchBody(stmt, seenCaseValues, hasDefault);
-                    prevStmt = stmt;
-                }
-            }
-            break;
-        }
-
-        // Recursively check nested statements
-        case Statement::SK_If: {
-            auto *ifStmt = dynamic_cast<IfStatement *>(body);
-            validateSwitchBody(ifStmt->getThenSt(), seenCaseValues, hasDefault);
-            if (ifStmt->getElseSt())
-                validateSwitchBody(ifStmt->getElseSt(), seenCaseValues, hasDefault);
-            break;
-        }
-
-        case Statement::SK_While: {
-            auto *whileStmt = dynamic_cast<WhileStatement *>(body);
-            validateSwitchBody(whileStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
-        case Statement::SK_DoWhile: {
-            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(body);
-            validateSwitchBody(doWhileStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
-        case Statement::SK_For: {
-            auto *forStmt = dynamic_cast<ForStatement *>(body);
-            validateSwitchBody(forStmt->getBody(), seenCaseValues, hasDefault);
-            break;
-        }
     }
 }
 
@@ -281,6 +187,7 @@ void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &bre
             breakableStack.pop_back();
             break;
         }
+
         case Statement::SK_Switch: {
             auto *switchStmt = dynamic_cast<SwitchStatement *>(stmt);
             std::string switchLabel = generateSwitchLabel();
@@ -416,63 +323,215 @@ void Sema::traverseStatement(Statement *stmt, std::vector<BreakableContext> &bre
     }
 }
 
-void Sema::initialize() {
-    CurrentScope = nullptr;
+
+bool Sema::isConstantExpression(Expr *expr) {
+    return expr->getKind() == Expr::Ek_Int;
 }
 
-Program *Sema::actOnProgramDeclaration(FuncList &Funcs) const {
+int64_t Sema::evaluateConstantExpression(Expr *expr) {
+    if (auto *intLit = dynamic_cast<IntegerLiteral *>(expr)) {
+        return intLit->getValue().getSExtValue();
+    }
+    // this should never be reached since we only allow constant integers
+    return 0;
+}
+
+/**
+ * @brief Validate the body of a switch statement recursively. These validations
+ * are applied according to the C standard.
+ *
+ * Performs the following validations:
+ * 1. Case values must be constant expressions
+ * 2. No duplicate case values
+ * 3. At most one default case
+ * 4. No variable declarations immediately after case/default labels
+ *
+ * @param body Switch body statement to validate.
+ * @param seenCaseValues Set to track and detect duplicate case values.
+ * @param hasDefault Flag indicating if a default case has been seen.
+ */
+void Sema::validateSwitchBody(Statement *body,
+                              std::set<int64_t> &seenCaseValues,
+                              bool &hasDefault) {
+    if (!body) return;
+
+    switch (body->getKind()) {
+        case Statement::SK_Case: {
+            const auto *caseStmt = dynamic_cast<CaseStatement *>(body);
+
+            // First check, case value must be a constant integer
+            Expr *value = caseStmt->getValue();
+            if (!isConstantExpression(value)) {
+                Diags.report(SMLoc(), diag::err_case_value_not_constant);
+                exit(1);
+            }
+
+            // Second check, look for duplicated cases
+            int64_t caseValue = evaluateConstantExpression(value);
+            if (seenCaseValues.contains(caseValue)) {
+                Diags.report(SMLoc(), diag::err_duplicate_case_value, std::to_string(caseValue));
+                exit(1);
+            }
+            seenCaseValues.insert(caseValue);
+            break;
+        }
+
+        case Statement::SK_Default: {
+            // Check 3: It has multiple defaults
+            if (hasDefault) {
+                Diags.report(SMLoc(), diag::err_multiple_default_in_switch);
+                exit(1);
+            }
+            hasDefault = true;
+            break;
+        }
+
+        case Statement::SK_Compound: {
+            auto *compound = dynamic_cast<CompoundStatement *>(body);
+            Statement *prevStmt = nullptr;
+
+            // Go over each item to validate the body
+            for (auto &item: *compound) {
+                // Check if current item is a Declaration following case/default
+                if (std::holds_alternative<VarDeclaration *>(item)) {
+                    if (prevStmt &&
+                        (prevStmt->getKind() == Statement::SK_Case ||
+                         prevStmt->getKind() == Statement::SK_Default)) {
+                        if (!avoid_errors) {
+                            Diags.report(SMLoc(), diag::err_declaration_after_case_label);
+                            exit(1);
+                        }
+                    }
+                    // Reset prevStmt since a declaration is not a statement
+                    prevStmt = nullptr;
+                } else if (std::holds_alternative<Statement *>(item)) {
+                    Statement *stmt = std::get<Statement *>(item);
+                    validateSwitchBody(stmt, seenCaseValues, hasDefault);
+                    prevStmt = stmt;
+                }
+            }
+            break;
+        }
+
+        // Recursively check nested statements
+        case Statement::SK_If: {
+            auto *ifStmt = dynamic_cast<IfStatement *>(body);
+            validateSwitchBody(ifStmt->getThenSt(), seenCaseValues, hasDefault);
+            if (ifStmt->getElseSt())
+                validateSwitchBody(ifStmt->getElseSt(), seenCaseValues, hasDefault);
+            break;
+        }
+
+        case Statement::SK_While: {
+            auto *whileStmt = dynamic_cast<WhileStatement *>(body);
+            validateSwitchBody(whileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_DoWhile: {
+            auto *doWhileStmt = dynamic_cast<DoWhileStatement *>(body);
+            validateSwitchBody(doWhileStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        case Statement::SK_For: {
+            auto *forStmt = dynamic_cast<ForStatement *>(body);
+            validateSwitchBody(forStmt->getBody(), seenCaseValues, hasDefault);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+
+void Sema::initialize() {
+    CurrentScope = nullptr;
+    GlobalSymbolTable = new Scope(nullptr);  // Separate table for IR generation
+}
+
+Program *Sema::actOnProgramDeclaration(DeclarationList &Decls) const {
     auto *p = Context.createProgram<Program>();
-    p->add_functions(Funcs);
+    p->add_functions(Decls);
     return p;
 }
 
-FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const {
+FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
+                                                    std::optional<StorageClass> storageClass) {
+    auto *FuncScope = CurrentScope->getParentScope();
+    // Functions have linkage (external or internal/static)
+    constexpr ScopeType scope = ScopeType::Global;
+
+    // Check if we're at block scope (inside a function, not at file-scope)
+    bool isBlockScope = (FuncScope->getParentScope() != nullptr);
+
+    // Static function declarations at block scope are not allowed in C
+    if (isBlockScope && storageClass == StorageClass::SC_Static && !avoid_errors) {
+        Diags.report(Loc, diag::err_static_block_scope_function);
+        return nullptr;
+    }
+
+    // Check local scope for conflict with local variable (no linkage)
+    // Book's rule: "if prev_entry.from_current_scope and (not prev_entry.has_linkage): fail"
+    if (FuncScope->hasSymbolInCurrentScope(Name)) {
+        const SymbolEntry *entry = FuncScope->lookupEntry(Name);
+        if (entry && entry->isLocalAttr() && !avoid_errors) {
+            // Local variable (no linkage) conflicts with function declaration
+            Diags.report(Loc, diag::err_linkage_conflict, Name);
+            return nullptr;
+        }
+    }
+
+    // Check GlobalSymbolTable for existing variable with same name
+    // (function cannot redeclare a file-scope variable)
+    VarDeclaration *existingVar = GlobalSymbolTable->lookupForVar(Name);
+    if (existingVar && !avoid_errors) {
+        Diags.report(Loc, diag::err_variable_redeclared_as_function, Name);
+        return nullptr;
+    }
+
+    // Check GlobalSymbolTable for existing function declaration
+    // (catches conflicts between block-scope declarations in different functions)
+    FunctionDeclaration *existing = GlobalSymbolTable->lookupForFunction(Name);
+    if (existing) {
+        // Check argument count matches
+        if (existing->getArgs().size() != args.size() && !avoid_errors) {
+            Diags.report(Loc, diag::err_wrong_argument_count, Name, existing->getArgs().size(), args.size());
+            return nullptr;
+        }
+
+        // Check linkage compatibility: "static follows non-static" is an error
+        const SymbolEntry *oldEntry = GlobalSymbolTable->lookupEntry(Name);
+        bool oldIsGlobal = oldEntry && oldEntry->isGlobal();
+        bool newIsStatic = (storageClass == StorageClass::SC_Static);
+
+        if (oldIsGlobal && newIsStatic && !avoid_errors) {
+            Diags.report(Loc, diag::err_static_follows_non_static, Name);
+            return nullptr;
+        }
+
+        // Also insert into local scope if at block scope (for name lookup in this scope)
+        if (isBlockScope) {
+            FuncScope->addDeclaredIdentifier(Name);
+            FuncScope->insert(existing, computeLinkage(storageClass, scope), scope);
+        }
+
+        // Multiple declarations are allowed - return existing
+        return existing;
+    }
+
+    // First declaration - create and insert
     auto *func = Context.createFunction<FunctionDeclaration>(Name, Loc, args);
 
-    // Function declarations always go into the global/file scope
-    // Even if declared inside a block, they have external linkage
-    // Loop up to find the global scope (the one with no parent)
-    Scope *globalScope = CurrentScope;
-    while (globalScope->getParentScope() != nullptr) {
-        globalScope = globalScope->getParentScope();
-    }
-    Scope *parentScope = CurrentScope->getParentScope();
-
-
-    if (parentScope && parentScope->hasLinkageConflict(Name, Linkage::External)) {
-        if (!avoid_errors) {
-            Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
-            return nullptr;
-        }
-    }
-    // Check if already declared in the target scope
-    if (globalScope->hasSymbolInCurrentScope(Name)) {
-        // Function redeclaration - lookup existing function
-        FunctionDeclaration *existing = globalScope->lookupForFunction(Name);
-        if (existing) {
-            // We check now the number of parameters
-            if (existing->getArgs().size() != args.size() && !avoid_errors) {
-                Diags.report(Loc, diag::err_wrong_argument_count, Name, existing->getArgs().size(), args.size());
-                return nullptr;
-            }
-
-            // Multiple declarations are allowed in C (e.g., forward declarations)
-            // TODO: Later, check type compatibility between declarations
-            // Return the EXISTING declaration so the body gets attached to the same object
-            return existing;
-        }
-        // Symbol exists but it's not a function (should have been caught by linkage check)
-        if (!avoid_errors) {
-            Diags.report(Loc, diag::erro_func_already_declared, Name.str());
-            return nullptr;
-        }
+    if (storageClass.has_value()) {
+        func->setStorageClass(storageClass.value());
     }
 
-    // First declaration - insert into target scope
-    globalScope->addDeclaredIdentifier(Name);
-    globalScope->insert(func, Linkage::External);
-    if (parentScope && globalScope != parentScope) {
-        parentScope->insert(func, Linkage::External);
+    // Insert into GlobalSymbolTable (for IR generation and cross-function visibility)
+    GlobalSymbolTable->addDeclaredIdentifier(Name);
+    GlobalSymbolTable->insert(func, computeLinkage(storageClass, scope), scope);
+
+    // Also insert into local scope if at block scope (for local variable conflict detection)
+    if (isBlockScope) {
+        FuncScope->insert(func, computeLinkage(storageClass, scope), scope);
     }
 
     return func;
@@ -498,7 +557,7 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
         // For parameters, we create a minimal VarDeclaration just for scope tracking
         auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
 
-        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
+        if (!CurrentScope->insert(Name, decl, Linkage::None, ScopeType::Local)) {
             if (!avoid_errors) {
                 Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
                 return nullptr;
@@ -512,48 +571,316 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
 }
 
 /**
- * @brief Process a variable declaration and add it to the current scope.
+ * @brief Process a local variable declaration and add it to the current scope.
  *
- * Creates the variable with its original name, adds it to the current scope,
- * and appends the declaration to the block items. Reports an error if
- * a variable with the same name already exists in the current scope.
+ * Adds the variable to the symbol table. The initializer validation
+ * is done separately by actOnVarDeclarationInit after parsing the expression.
  *
  * @param Items Block items list to append the declaration to.
  * @param Loc Source location of the variable declaration.
  * @param Name Variable name.
- * @return true if a duplicate declaration error occurred, false on success.
+ * @param storageClass type of storage (Static or Extern)
+ * @return true if an error occurred, false on success.
  */
-bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const {
-    // Create declaration with original name (no renaming)
+bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
+                               std::optional<StorageClass> storageClass) {
+    if (!CurrentScope) {
+        return true;
+    }
+
+    // Check for conflicts in current scope first
+    if (CurrentScope->hasSymbolInCurrentScope(Name) &&
+        CurrentScope->hasLinkageConflict(Name, storageClass) && !avoid_errors) {
+        Diags.report(Loc, diag::err_linkage_conflict, Name);
+        return true;
+    }
+
     auto *var = Context.createExpression<Var>(Loc, Name);
-    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, nullptr, storageClass);
 
-
-    // Add to current scope if it exists
-    if (CurrentScope) {
-        // Check if there's already a symbol with a different linkage, to show a different error.
-        if (CurrentScope->hasLinkageConflict(Name, Linkage::None)) {
-            if (!avoid_errors) {
-                Diags.report(SMLoc(), diag::err_linkage_conflict, Name);
-                return true;
+    if (storageClass == StorageClass::SC_Extern) {
+        // extern local variable
+        // Step 1: Check CURRENT SCOPE ONLY for conflicts
+        // (can't have both "extern int x" and "int x" in the same scope)
+        if (CurrentScope->hasSymbolInCurrentScope(Name)) {
+            const SymbolEntry *currentEntry = CurrentScope->lookupEntry(Name);
+            if (currentEntry != nullptr) {
+                if (currentEntry->isFunction() && !avoid_errors) {
+                    Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                    return true;
+                }
+                // If there's already a local variable in current scope, it's a conflict
+                if (currentEntry->isLocalAttr() && !avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return true;
+                }
+                // If there's already a static local in current scope, it's a conflict
+                const StaticAttr *attrs = currentEntry->getStaticAttr();
+                if (attrs != nullptr && !attrs->global && !avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return true;
+                }
+                // Previous extern in current scope - valid redeclaration, don't add again
+                Items.emplace_back(decl);
+                return false;
             }
         }
-        // We try to insert it, but another declaration exists
-        // this is an error, in the same scope (block) two variables
-        // cannot have the same name.
-        if (!CurrentScope->insert(Name, decl, Linkage::None)) {
-            if (!avoid_errors) {
-                Diags.report(Loc, diag::err_duplicate_variable_declaration, Name.str());
+
+        // Step 2: Look at GlobalSymbolTable for existing declaration with linkage
+        // (extern at block scope should refer to file-scope, not local vars in outer scopes)
+        const SymbolEntry *globalEntry = GlobalSymbolTable->lookupEntry(Name);
+        if (globalEntry != nullptr) {
+            if (globalEntry->isFunction() && !avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
                 return true;
             }
+            // Found existing declaration with linkage - inherit its attributes
+        } else {
+            // No prior declaration with linkage exists.
+            // Block-scope extern creates a NEW identifier with external linkage.
+            // Track this for conflict detection with later file-scope static declarations,
+            // but DON'T add to global scope's visible symbols (name is only visible in block).
+            BlockScopeExternLinkage.insert(Name.str());
         }
 
-        // Track that this variable was declared in the current scope
+        // Add extern declaration to current scope for local name lookup
+        CurrentScope->insert(Name, decl, Linkage::External, ScopeType::Local);
         CurrentScope->addDeclaredIdentifier(Name);
+        StaticAttr attrs{InitialValue::NoInitializer, std::nullopt, true};
+        CurrentScope->updateSymbolEntry(Name, attrs);
+    } else if (storageClass == StorageClass::SC_Static) {
+        // Static local - add to CurrentScope for local name lookup
+        CurrentScope->insert(Name, decl, Linkage::Static, ScopeType::Local);
+        CurrentScope->addDeclaredIdentifier(Name);
+        // Temporarily set Initial(0), will be updated in actOnVarDeclarationInit
+        StaticAttr attrs{InitialValue::Initial, 0, false};
+        CurrentScope->updateSymbolEntry(Name, attrs);
+
+        // Also add to GlobalSymbolTable with unique name for IR generation
+        // Static locals are "moved to top level" with unique names like "functionName.varName"
+        // If there's already a static local with the same base name, append a counter
+        std::string baseName = CurrentFunctionName + "." + Name.str();
+        std::string uniqueName = baseName;
+        int counter = 1;
+        while (GlobalSymbolTable->hasSymbolInCurrentScope(uniqueName)) {
+            uniqueName = baseName + "." + std::to_string(counter++);
+        }
+
+        // Store the unique name in the declaration so IRGen can find it
+        decl->setUniqueName(uniqueName);
+
+        GlobalSymbolTable->insert(uniqueName, decl, Linkage::Static, ScopeType::Global);
+        GlobalSymbolTable->updateSymbolEntry(uniqueName, attrs);
+    } else {
+        // Regular local variable (automatic storage)
+        CurrentScope->insert(Name, decl, Linkage::None, ScopeType::Local);
+        CurrentScope->addDeclaredIdentifier(Name);
+        // LocalAttr is set automatically by SymbolEntry constructor
     }
 
     Items.emplace_back(decl);
     return false;
+}
+
+/**
+ * @brief Validate and set the initializer for a variable declaration.
+ *
+ * Implements semantic checks for block-scope variable initializers:
+ * - extern: no initializer allowed
+ * - static: must have constant initializer (or defaults to 0)
+ * - regular: any initializer allowed
+ *
+ * @param decl The variable declaration to validate.
+ * @param initExpr Optional initializer expression.
+ * @return true if an error occurred, false on success.
+ */
+bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
+    if (!decl) return true;
+
+    std::optional<StorageClass> storageClass = decl->getStorageClass();
+    StringRef Name = decl->getVar()->getName();
+
+    if (storageClass == StorageClass::SC_Extern) {
+        // extern local variable - no initializer allowed
+        if (initExpr != nullptr && !avoid_errors) {
+            Diags.report(SMLoc(), diag::err_extern_variable_has_initializer, Name);
+            return true;
+        }
+        // Don't set expression for extern
+        return false;
+    }
+
+    if (storageClass == StorageClass::SC_Static) {
+        // static local variable - must have constant initializer
+        InitialValue initialValue;
+        std::optional<int64_t> constantValue = std::nullopt;
+
+        if (initExpr != nullptr) {
+            if (isConstantExpression(initExpr)) {
+                initialValue = InitialValue::Initial;
+                constantValue = evaluateConstantExpression(initExpr);
+            } else {
+                if (!avoid_errors) {
+                    Diags.report(SMLoc(), diag::err_non_constant_initializer);
+                    return true;
+                }
+                initialValue = InitialValue::Initial;
+                constantValue = 0;
+            }
+        } else {
+            // No initializer - defaults to 0
+            initialValue = InitialValue::Initial;
+            constantValue = 0;
+        }
+
+        // Update the symbol entry with the actual initial value
+        StaticAttr attrs{initialValue, constantValue, false};
+        CurrentScope->updateSymbolEntry(Name, attrs);
+
+        // Also update GlobalSymbolTable with the unique name (stored in declaration)
+        if (decl->getUniqueName().has_value()) {
+            GlobalSymbolTable->updateSymbolEntry(decl->getUniqueName().value(), attrs);
+        }
+    }
+
+    // Set the expression on the declaration
+    decl->setExpr(initExpr);
+    return false;
+}
+
+VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
+                                                 std::optional<StorageClass> storageClass) {
+    // Step 1-3: Determine initial_value based on initializer
+    InitialValue initialValue;
+    std::optional<int64_t> constantValue = std::nullopt;
+
+    if (initExpr != nullptr) {
+        // Has an initializer - must be a constant integer
+        // Future improvements could be done here to allow
+        // more expression types
+        if (isConstantExpression(initExpr)) {
+            initialValue = InitialValue::Initial;
+            constantValue = evaluateConstantExpression(initExpr);
+        } else {
+            // Non-constant initializer at file scope is an error
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_non_constant_initializer);
+                return nullptr;
+            }
+            initialValue = InitialValue::Tentative; // Fallback for error recovery
+        }
+    } else {
+        // No initializer
+        if (storageClass == StorageClass::SC_Extern) {
+            // If it is extern, this value could come from another file
+            // we cannot provide a value 0 for initialization
+            initialValue = InitialValue::NoInitializer;
+        } else {
+            // If it is not Extern, a tenative value could be 0
+            initialValue = InitialValue::Tentative;
+        }
+    }
+
+    // Step 4: Determine global linkage (external vs internal)
+    bool global = (storageClass != StorageClass::SC_Static);
+
+    // Check for conflict with block-scope extern that established external linkage
+    if (!global && BlockScopeExternLinkage.contains(Name.str()) && !avoid_errors) {
+        // File-scope static conflicts with prior block-scope extern (which has external linkage)
+        Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+        return nullptr;
+    }
+
+    // Check for conflict with previously declared function
+    if (GlobalSymbolTable->lookupForFunction(Name) && !avoid_errors) {
+        Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+        return nullptr;
+    }
+
+    // Step 5: Check if symbol already exists in the symbol table
+    const SymbolEntry *oldEntry = CurrentScope->lookupEntry(Name);
+    if (oldEntry != nullptr) {
+        // Check if it's a function being redeclared as a variable
+        if (oldEntry->isFunction()) {
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                return nullptr;
+            }
+        }
+
+        // Get the old static attributes
+        const StaticAttr *oldAttrs = oldEntry->getStaticAttr();
+        if (oldAttrs == nullptr) {
+            // It's a LocalAttr which shouldn't happen at file scope, treat as error
+            if (!avoid_errors) {
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                return nullptr;
+            }
+        } else {
+            // Handle extern: inherit global from previous declaration
+            if (storageClass == StorageClass::SC_Extern) {
+                global = oldAttrs->global;
+            } else if (oldAttrs->global != global) {
+                // Conflicting linkage (static vs non-static)
+                if (!avoid_errors) {
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    return nullptr;
+                }
+            }
+
+            // Merge initialization values
+            if (oldAttrs->init == InitialValue::Initial) {
+                // Old declaration has a constant initializer
+                if (initialValue == InitialValue::Initial) {
+                    // Both have constant initializers - conflicting definitions
+                    if (!avoid_errors) {
+                        Diags.report(Loc, diag::err_conflicting_file_scope_definitions, Name);
+                        return nullptr;
+                    }
+                } else {
+                    // Keep the old initializer
+                    initialValue = oldAttrs->init;
+                    constantValue = oldAttrs->value;
+                }
+            } else if (initialValue != InitialValue::Initial && oldAttrs->init == InitialValue::Tentative) {
+                // Both are tentative or new is NoInitializer and old is Tentative
+                initialValue = InitialValue::Tentative;
+            }
+        }
+
+        // Update the existing symbol entry with merged attributes
+        StaticAttr newAttrs{initialValue, constantValue, global};
+        CurrentScope->updateSymbolEntry(Name, newAttrs);
+        GlobalSymbolTable->updateSymbolEntry(Name, newAttrs);
+
+        // Return the existing variable declaration (don't create a new one)
+        VarDeclaration *existingDecl = CurrentScope->lookupForVar(Name);
+        if (existingDecl && initExpr != nullptr && existingDecl->getExpr() == nullptr) {
+            // Update the existing declaration with the new initializer
+            existingDecl->setExpr(initExpr);
+        }
+        return existingDecl;
+    }
+
+    // Step 7: Create new declaration and add to symbol table
+    auto *var = Context.createExpression<Var>(Loc, Name);
+    auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, initExpr, storageClass);
+
+    // Create the StaticAttr and insert into scope
+    // Note: We manually construct the symbol entry since we need specific initial values
+    StaticAttr attrs{initialValue, constantValue, global};
+    Linkage linkage = global ? Linkage::External : Linkage::Static;
+
+    // Add to CurrentScope (for scope chain lookups)
+    CurrentScope->insert(Name, decl, linkage, ScopeType::Global);
+    CurrentScope->addDeclaredIdentifier(Name);
+    CurrentScope->updateSymbolEntry(Name, attrs);
+
+    // Also add to GlobalSymbolTable (for IR generation)
+    GlobalSymbolTable->insert(Name, decl, linkage, ScopeType::Global);
+    GlobalSymbolTable->updateSymbolEntry(Name, attrs);
+
+    return decl;
 }
 
 void Sema::actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const {
@@ -730,6 +1057,14 @@ ConditionalExpr *Sema::actOnTernaryOperator(SMLoc, Expr *left, Expr *middle, Exp
  */
 FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const {
     FunctionDeclaration *func = CurrentScope->lookupForFunction(name);
+    if (!func) {
+        if (CurrentScope->lookupForVar(name) && !avoid_errors) {
+            Diags.report(Loc, diag::err_definition_used_as_function, name);
+            return nullptr;
+        }
+        func = GlobalSymbolTable->lookupForFunction(name);
+    }
+
     if (func != nullptr) {
         if (func->getArgs().size() != args.size() && !avoid_errors) {
             Diags.report(Loc, diag::err_wrong_argument_call, name, args.size(), func->getArgs().size());

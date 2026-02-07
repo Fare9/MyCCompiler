@@ -12,7 +12,6 @@
 #include <fmt/core.h>
 
 #include "AST.hpp"
-#include "AST.hpp"
 
 namespace mycc {
     class Program;
@@ -23,13 +22,67 @@ namespace mycc {
 
     using ExprList = std::vector<Expr *>;
     using StmtList = std::vector<Statement *>;
-    using BlockItem = std::variant<Statement *, VarDeclaration *, FunctionDeclaration*, std::monostate>;
+    using BlockItem = std::variant<Statement *, VarDeclaration *, FunctionDeclaration *, std::monostate>;
     using ForInit = std::variant<VarDeclaration *, Expr *, std::monostate>;
     using BlockItems = std::vector<BlockItem>;
-    using FuncList = std::vector<FunctionDeclaration *>;
+    using DeclarationList = std::vector<std::variant<FunctionDeclaration *, VarDeclaration *> >;
 
-    // Base classes
+    /// @brief Storage class specifiers that can appear on declarations
+    /// (`static` or `extern`).
+    enum class StorageClass {
+        SC_Static,
+        SC_Extern,
+    };
 
+    /// @brief Base class for all types in the AST. Uses a discriminator kind
+    /// to support LLVM-style RTTI (`classof`).
+    class Type {
+    public:
+        enum TypeKind {
+            TK_Builtin,
+            TK_Pointer,
+            TK_Function,
+        };
+
+    private:
+        const TypeKind Kind;
+
+    protected:
+        explicit Type(TypeKind Kind) : Kind(Kind) {
+        }
+
+    public:
+        virtual ~Type() = default;
+
+        [[nodiscard]] TypeKind getKind() const { return Kind; }
+    };
+
+    /// @brief Represents a built-in primitive type (e.g. `int`, `void`).
+    class BuiltinType : public Type {
+    public:
+        enum BuiltinKind {
+            Int,
+            Void,
+            // For the moment, we can include in the future more
+        };
+
+    private:
+        BuiltinKind BuiltinK;
+
+    public:
+        explicit BuiltinType(BuiltinKind K)
+            : Type(TK_Builtin), BuiltinK(K) {
+        }
+
+        [[nodiscard]] BuiltinKind getBuiltinKind() const { return BuiltinK; }
+
+        static bool classof(const Type *T) {
+            return T->getKind() == TK_Builtin;
+        }
+    };
+
+    /// @brief Base class for all statement AST nodes. Each concrete statement
+    /// carries a StmtKind discriminator for LLVM-style RTTI.
     class Statement {
     public:
         enum StmtKind {
@@ -65,6 +118,8 @@ namespace mycc {
         }
     };
 
+    /// @brief Base class for all expression AST nodes. Each concrete expression
+    /// carries an ExprKind discriminator for LLVM-style RTTI.
     class Expr {
     public:
         enum ExprKind {
@@ -96,6 +151,8 @@ namespace mycc {
 
     // Statements and Expressions
 
+    /// @brief AST node for a `return` statement, optionally carrying a
+    /// return-value expression.
     class ReturnStatement : public Statement {
         Expr *RetVal;
 
@@ -105,7 +162,7 @@ namespace mycc {
 
         ~ReturnStatement() override = default;
 
-        Expr *getRetVal() const {
+        [[nodiscard]] Expr *getRetVal() const {
             return RetVal;
         }
 
@@ -114,6 +171,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an expression used as a statement (e.g. `foo();`).
     class ExpressionStatement : public Statement {
         Expr *expr;
 
@@ -123,7 +181,7 @@ namespace mycc {
 
         ~ExpressionStatement() override = default;
 
-        Expr *getExpr() const {
+        [[nodiscard]] Expr *getExpr() const {
             return expr;
         }
 
@@ -132,6 +190,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an `if` statement with mandatory then-branch
+    /// and optional else-branch.
     class IfStatement : public Statement {
         Expr *condition;
         // mandatory in if
@@ -140,7 +200,8 @@ namespace mycc {
         Statement *else_st;
 
     public:
-        IfStatement(Expr *condition, Statement *then_st) : Statement(SK_If), condition(condition), then_st(then_st) {
+        IfStatement(Expr *condition, Statement *then_st) : Statement(SK_If), condition(condition), then_st(then_st),
+                                                           else_st(nullptr) {
         }
 
         IfStatement(Expr *condition, Statement *then_st, Statement *else_st) : Statement(SK_If), condition(condition),
@@ -149,15 +210,15 @@ namespace mycc {
 
         ~IfStatement() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return condition;
         }
 
-        Statement *getThenSt() const {
+        [[nodiscard]] Statement *getThenSt() const {
             return then_st;
         }
 
-        Statement *getElseSt() const {
+        [[nodiscard]] Statement *getElseSt() const {
             return else_st;
         }
 
@@ -170,6 +231,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a compound statement (block): a brace-enclosed
+    /// sequence of statements and declarations.
     class CompoundStatement : public Statement {
         BlockItems block;
 
@@ -183,11 +246,11 @@ namespace mycc {
             return block;
         }
 
-        const BlockItems &getBlock() const {
+        [[nodiscard]] const BlockItems &getBlock() const {
             return block;
         }
 
-        BlockItem get_item(size_t i) {
+        [[nodiscard]] BlockItem get_item(size_t i) const {
             return i >= block.size() ? std::monostate{} : block[i];
         }
 
@@ -212,6 +275,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a label statement (`label:`), used as a target
+    /// for `goto`.
     class LabelStatement : public Statement {
         StringRef Label;
 
@@ -221,7 +286,7 @@ namespace mycc {
 
         ~LabelStatement() override = default;
 
-        StringRef getLabel() const {
+        [[nodiscard]] StringRef getLabel() const {
             return Label;
         }
 
@@ -230,6 +295,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `goto label;` statement.
     class GotoStatement : public Statement {
         StringRef Label;
 
@@ -239,7 +305,7 @@ namespace mycc {
 
         ~GotoStatement() override = default;
 
-        StringRef getLabel() const {
+        [[nodiscard]] StringRef getLabel() const {
             return Label;
         }
 
@@ -248,8 +314,9 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `break;` statement. The label is resolved
+    /// during semantic analysis to identify the enclosing loop or switch.
     class BreakStatement : public Statement {
-    private:
         std::string label;
 
     public:
@@ -258,11 +325,11 @@ namespace mycc {
 
         ~BreakStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -271,8 +338,9 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `continue;` statement. The label is resolved
+    /// during semantic analysis to identify the enclosing loop.
     class ContinueStatement : public Statement {
-    private:
         std::string label;
 
     public:
@@ -281,11 +349,11 @@ namespace mycc {
 
         ~ContinueStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -294,6 +362,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `while (condition) body` loop.
     class WhileStatement : public Statement {
     private:
         // condition inside of while statement
@@ -309,19 +378,19 @@ namespace mycc {
 
         ~WhileStatement() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return Condition;
         }
 
-        Statement *getBody() const {
+        [[nodiscard]] Statement *getBody() const {
             return Body;
         }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -330,8 +399,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `do body while (condition);` loop.
     class DoWhileStatement : public Statement {
-    private:
         // Body of the do/while condition
         Statement *Body;
         // condition inside of while statement
@@ -345,19 +414,19 @@ namespace mycc {
 
         ~DoWhileStatement() override = default;
 
-        Statement *getBody() const {
+        [[nodiscard]] Statement *getBody() const {
             return Body;
         }
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return Condition;
         }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -366,8 +435,9 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `for (init; condition; post) body` loop.
+    /// The init clause may be a declaration, an expression, or empty.
     class ForStatement : public Statement {
-    private:
         ForInit Init; // This can be a Declaration, Expr, or nothing
         Expr *Condition; // Optional condition
         Expr *Post; // Optional post expression
@@ -377,27 +447,27 @@ namespace mycc {
 
     public:
         ForStatement(ForInit init, Expr *condition, Expr *post, Statement *body) : Statement(SK_For),
-            Init(std::move(init)), Condition(condition),
+            Init(init), Condition(condition),
             Post(post), Body(body) {
         }
 
         ~ForStatement() override = default;
 
-        const ForInit &getInit() const {
+        [[nodiscard]] const ForInit &getInit() const {
             return Init;
         }
 
-        Expr *getCondition() const { return Condition; }
+        [[nodiscard]] Expr *getCondition() const { return Condition; }
 
-        Expr *getPost() const { return Post; }
+        [[nodiscard]] Expr *getPost() const { return Post; }
 
-        Statement *getBody() const { return Body; }
+        [[nodiscard]] Statement *getBody() const { return Body; }
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
@@ -406,6 +476,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `case expr:` label inside a switch statement.
     class CaseStatement : public Statement {
         Expr *Value; // Constant expression checked
         std::string label; // the label of the case for jumping
@@ -415,17 +486,18 @@ namespace mycc {
 
         ~CaseStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
 
-        Expr *getValue() const { return Value; }
+        [[nodiscard]] Expr *getValue() const { return Value; }
     };
 
+    /// @brief AST node for a `default:` label inside a switch statement.
     class DefaultStatement : public Statement {
         std::string label; // Internal label for Jumping
     public:
@@ -434,16 +506,17 @@ namespace mycc {
 
         ~DefaultStatement() override = default;
 
-        void set_label(std::string label) {
+        void set_label(const std::string &label) {
             this->label = label;
         }
 
-        std::string_view get_label() const {
+        [[nodiscard]] std::string_view get_label() const {
             return label;
         }
     };
 
-
+    /// @brief AST node for a `switch (expr) { ... }` statement. The body
+    /// is typically a CompoundStatement containing case/default labels.
     class SwitchStatement : public Statement {
         Expr *Condition; // Controlling expression
         Statement *Body; // Usually a switch will be a CompoundStatement containing case labels
@@ -452,23 +525,24 @@ namespace mycc {
         SwitchStatement(Expr *condition, Statement *body) : Statement(SK_Switch), Condition(condition), Body(body) {
         }
 
-        Expr *get_condition() const {
+        [[nodiscard]] Expr *get_condition() const {
             return Condition;
         }
 
-        Statement *get_body() const {
+        [[nodiscard]] Statement *get_body() const {
             return Body;
         }
 
-        void set_break_label(std::string label) {
+        void set_break_label(const std::string &label) {
             this->break_label = label;
         }
 
-        std::string_view get_break_label() const {
+        [[nodiscard]] std::string_view get_break_label() const {
             return this->break_label;
         }
     };
 
+    /// @brief AST node for a null (empty) statement: a bare `;`.
     class NullStatement : public Statement {
     public:
         explicit NullStatement() : Statement(SK_Null) {
@@ -481,6 +555,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an integer literal constant (e.g. `42`).
     class IntegerLiteral : public Expr {
         SMLoc Loc;
         llvm::APSInt Value;
@@ -502,6 +577,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a variable reference expression (an identifier
+    /// that refers to a declared variable).
     class Var : public Expr {
         SMLoc Loc;
         std::string Name;
@@ -524,6 +601,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a unary operator expression (complement `~`,
+    /// negate `-`, logical not `!`).
     class UnaryOperator : public Expr {
     public:
         enum UnaryOperatorKind {
@@ -561,6 +640,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a binary operator expression (arithmetic, bitwise,
+    /// relational, and logical operators like `+`, `<<`, `<`, `&&`, etc.).
     class BinaryOperator : public Expr {
     public:
         enum BinaryOpKind {
@@ -628,6 +709,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an assignment expression (`lvalue = rvalue`),
+    /// including compound assignments that have been desugared.
     class AssignmentOperator : public Expr {
         SMLoc Loc;
         Expr *left;
@@ -653,6 +736,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a prefix increment/decrement expression
+    /// (`++x` or `--x`).
     class PrefixOperator : public Expr {
     public:
         enum PrefixOpKind {
@@ -689,6 +774,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a postfix increment/decrement expression
+    /// (`x++` or `x--`).
     class PostfixOperator : public Expr {
     public:
         enum PostfixOpKind {
@@ -702,8 +789,8 @@ namespace mycc {
         Expr *expr;
 
     public:
-        PostfixOperator(SMLoc Loc, PostfixOpKind OpKind, Expr *expr) : Expr(Ek_PostfixOperator), Loc(Loc),
-                                                                       OpKind(OpKind), expr(expr) {
+        PostfixOperator(const SMLoc Loc, const PostfixOpKind OpKind, Expr *expr) : Expr(Ek_PostfixOperator), Loc(Loc),
+            OpKind(OpKind), expr(expr) {
         }
 
         ~PostfixOperator() override = default;
@@ -725,6 +812,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a ternary conditional expression
+    /// (`condition ? left : right`).
     class ConditionalExpr : public Expr {
         Expr *condition;
         Expr *left;
@@ -737,15 +826,15 @@ namespace mycc {
 
         ~ConditionalExpr() override = default;
 
-        Expr *getCondition() const {
+        [[nodiscard]] Expr *getCondition() const {
             return condition;
         }
 
-        Expr *getLeft() const {
+        [[nodiscard]] Expr *getLeft() const {
             return left;
         }
 
-        Expr *getRight() const {
+        [[nodiscard]] Expr *getRight() const {
             return right;
         }
 
@@ -754,6 +843,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a function call expression (`identifier(args...)`).
     class FunctionCallExpr : public Expr {
         SMLoc Loc;
         std::string identifier;
@@ -783,21 +873,29 @@ namespace mycc {
         }
     };
 
-    // Declaration
-
     using ArgsList = std::vector<Var *>;
 
+    /// @brief AST node for a variable declaration, with optional initializer
+    /// and storage class. Static local variables may carry a unique name
+    /// for code generation.
     class VarDeclaration {
         SMLoc Loc;
         Var *Name;
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
+        std::optional<StorageClass> storageClass;
+        // For static local variables, stores the unique global name (e.g., "func.var.1")
+        std::optional<std::string> uniqueName;
 
     public:
-        VarDeclaration(SMLoc Loc, Var *Name) : Loc(Loc), Name(Name) {
+        VarDeclaration(const SMLoc Loc, Var *Name) : Loc(Loc), Name(Name) {
         }
 
-        VarDeclaration(SMLoc Loc, Var *Name, Expr *expr) : Loc(Loc), Name(Name), expr(expr) {
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr) : Loc(Loc), Name(Name), expr(expr) {
+        }
+
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass)
+            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass) {
         }
 
         ~VarDeclaration() = default;
@@ -806,24 +904,49 @@ namespace mycc {
             return Name;
         }
 
-        Expr *getExpr() const {
+        [[nodiscard]] Expr *getExpr() const {
             return expr;
         }
 
         void setExpr(Expr *e) {
             expr = e;
         }
+
+        [[nodiscard]] std::optional<StorageClass> getStorageClass() const {
+            return storageClass;
+        }
+
+        void setStorageClass(StorageClass sc) {
+            storageClass = sc;
+        }
+
+        [[nodiscard]] const std::optional<std::string>& getUniqueName() const {
+            return uniqueName;
+        }
+
+        void setUniqueName(const std::string& name) {
+            uniqueName = name;
+        }
     };
 
+    /// @brief AST node for a function declaration or definition. A declaration
+    /// has no body; a definition has a body (list of block items). Supports
+    /// storage class specifiers for linkage control.
     class FunctionDeclaration {
         SMLoc Loc;
         StringRef Name;
         ArgsList args;
-        bool IsDefinition = false;  // True if function has a body (even if empty)
+        bool IsDefinition = false; // True if function has a body (even if empty)
         BlockItems body;
+        std::optional<StorageClass> storageClass;
 
     public:
-        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args) : Name(Name), Loc(Loc), args(std::move(args)) {
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args)
+            : Loc(Loc), Name(Name), args(std::move(args)) {
+        }
+
+        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
+            : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
         }
 
         ~FunctionDeclaration() = default;
@@ -834,7 +957,7 @@ namespace mycc {
 
         void setBody(BlockItems &s) {
             body = std::move(s);
-            IsDefinition = true;  // Mark as definition when body is set
+            IsDefinition = true; // Mark as definition when body is set
         }
 
         void setArgs(ArgsList &newArgs) {
@@ -869,7 +992,7 @@ namespace mycc {
             return args;
         }
 
-        BlockItem get_item(size_t i) {
+        [[nodiscard]] BlockItem get_item(size_t i) const {
             return i >= body.size() ? std::monostate{} : body[i];
         }
 
@@ -888,47 +1011,66 @@ namespace mycc {
         [[nodiscard]] BlockItems::const_iterator end() const {
             return body.end();
         }
+
+        [[nodiscard]] std::optional<StorageClass> getStorageClass() const {
+            return storageClass;
+        }
+
+        void setStorageClass(StorageClass sc) {
+            storageClass = sc;
+        }
+
+        /// Returns true if the function has external linkage (is NOT static)
+        [[nodiscard]] bool isGlobal() const {
+            return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
+        }
     };
 
+    /// @brief Root AST node representing a full translation unit (compilation
+    /// unit). Contains all top-level declarations: functions and global variables.
     class Program {
-        FuncList functions;
+        DeclarationList declarations;
 
     public:
         Program() = default;
 
         ~Program() = default;
 
-        void add_functions(FuncList &funcs) {
-            functions = std::move(funcs);
+        void add_functions(DeclarationList &funcs) {
+            declarations = std::move(funcs);
         }
 
         void add_function(FunctionDeclaration *func) {
-            functions.push_back(func);
+            declarations.emplace_back(func);
         }
 
-        [[nodiscard]] size_t get_number_of_functions() const {
-            return functions.size();
+        void add_variable(VarDeclaration *var) {
+            declarations.emplace_back(var);
         }
 
-        FunctionDeclaration *get_function(size_t i) {
-            return i >= functions.size() ? nullptr : functions[i];
+        [[nodiscard]] size_t get_number_of_declarations() const {
+            return declarations.size();
+        }
+
+        [[nodiscard]] std::variant<FunctionDeclaration *, VarDeclaration *> get_declaration(size_t i) const {
+            return declarations.at(i);
         }
 
         // Iterator support for range-based for loops
-        FuncList::iterator begin() {
-            return functions.begin();
+        DeclarationList::iterator begin() {
+            return declarations.begin();
         }
 
-        FuncList::iterator end() {
-            return functions.end();
+        DeclarationList::iterator end() {
+            return declarations.end();
         }
 
-        [[nodiscard]] FuncList::const_iterator begin() const {
-            return functions.begin();
+        [[nodiscard]] DeclarationList::const_iterator begin() const {
+            return declarations.begin();
         }
 
-        [[nodiscard]] FuncList::const_iterator end() const {
-            return functions.end();
+        [[nodiscard]] DeclarationList::const_iterator end() const {
+            return declarations.end();
         }
     };
 }

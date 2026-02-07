@@ -8,7 +8,6 @@
 #include <vector>
 #include <string>
 #include <set>
-#include <map>
 
 namespace mycc {
     /**
@@ -27,8 +26,17 @@ namespace mycc {
 
         DiagnosticsEngine &Diags;
         ASTContext &Context;
+        Scope *GlobalSymbolTable;  // Collects all top-level definitions for IR generation
         Scope *CurrentScope;
         bool avoid_errors = false;
+
+        // Current function name for generating unique static local names
+        std::string CurrentFunctionName;
+
+        // Track identifiers that have been given external linkage via block-scope extern.
+        // This is separate from scope visibility - used to detect conflicts with
+        // later file-scope static declarations.
+        std::set<std::string> BlockScopeExternLinkage;
 
 
         // Set that contains for a method the labels
@@ -46,7 +54,7 @@ namespace mycc {
         /**
          * @brief We keep this structure to maintain the context for the break instructions.
          * with the `base_level` we generate the break and the continue label. We also
-         * keep metadata to know if we are inside of a loop.
+         * keep metadata to know if we are inside a loop.
          */
         struct BreakableContext {
             std::string base_label;
@@ -142,14 +150,26 @@ namespace mycc {
          */
         void checkGotoLabelsCorrectlyPointToFunction() const;
 
+        /**
+         * Compute the Linkage depending on the Storage class and the scope.
+         * @param sc optional value of storage class.
+         * @param scope scope of the declaration.
+         * @return linkage type.
+         */
+        static Linkage computeLinkage(std::optional<StorageClass> sc, ScopeType scope);
+
     public:
         /**
          * @brief Constructs a Sema object for semantic analysis.
          * @param Diags Diagnostics engine for error reporting.
          * @param Context AST context for creating AST nodes.
          */
-        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context) {
+        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context), GlobalSymbolTable(nullptr), CurrentScope(nullptr) {
             initialize();
+        }
+
+        ~Sema() {
+            delete GlobalSymbolTable;
         }
 
         /**
@@ -159,8 +179,12 @@ namespace mycc {
             avoid_errors = true;
         }
 
-        bool is_avoid_errors_active() {
+        [[nodiscard]] bool is_avoid_errors_active() const {
             return avoid_errors;
+        }
+
+        [[nodiscard]] const Scope& getGlobalSymbolTable() const {
+            return *GlobalSymbolTable;
         }
 
         /**
@@ -170,13 +194,14 @@ namespace mycc {
 
         /**
          * @brief Enter a new function scope, clearing function-level state.
+         * @param name The function name (used for generating unique static local names).
          */
-        void enterFunction();
+        void enterFunction(StringRef name);
 
         /**
          * @brief Exit function scope and validate goto labels.
          */
-        void exitFunction();
+        void exitFunction() const;
 
         /**
          * @brief Enter a new lexical scope for variable declarations.
@@ -195,11 +220,11 @@ namespace mycc {
         void assignLoopLabels(FunctionDeclaration &F);
 
         /**
-         * @brief Create a Program node from a list of functions.
-         * @param Funcs List of functions in the program.
+         * @brief Create a Program node from a list of declarations.
+         * @param Decls List of declarations in the program.
          * @return Pointer to the created Program node.
          */
-        Program *actOnProgramDeclaration(FuncList &Funcs) const;
+        Program *actOnProgramDeclaration(DeclarationList &Decls) const;
 
         /**
          * @brief Create a Function node.
@@ -208,7 +233,7 @@ namespace mycc {
          * @param args Function parameters.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args) const;
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
@@ -216,16 +241,56 @@ namespace mycc {
          * @param Name Parameter name.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
 
         /**
-         * @brief Process a variable declaration and add it to the current scope.
+         * @brief Process a local variable declaration and add it to the current scope.
+         *
+         * Adds the variable to the symbol table. The initializer validation
+         * is done separately by actOnVarDeclarationInit after parsing the expression.
+         *
          * @param Items Block items list to append the declaration to.
          * @param Loc Source location of the declaration.
          * @param Name Variable name.
-         * @return true on error (duplicate declaration), false on success.
+         * @param storageClass type of storage (Static or Extern)
+         * @return true on error, false on success.
          */
-        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name) const;
+        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                 std::optional<StorageClass> storageClass);
+
+        /**
+         * @brief Validate and set the initializer for a variable declaration.
+         *
+         * Implements semantic checks for block-scope variable initializers:
+         * - extern: no initializer allowed
+         * - static: must have constant initializer (or defaults to 0)
+         * - regular: any initializer allowed
+         *
+         * @param decl The variable declaration to validate.
+         * @param initExpr Optional initializer expression.
+         * @return true on error, false on success.
+         */
+        bool actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr);
+
+        /**
+         * @brief Process a file-scope (global) variable declaration.
+         *
+         * Implements the semantic analysis for file-scope variables as described
+         * in Chapter 10 of "Writing a C Compiler". Handles:
+         * - Constant initializer validation
+         * - Tentative definitions
+         * - extern declarations without initializers
+         * - Linkage conflict detection between declarations
+         * - Merging of multiple declarations of the same variable
+         *
+         * @param Loc Source location of the declaration.
+         * @param Name Variable name.
+         * @param initExpr Optional initializer expression (must be constant if present).
+         * @param storageClass Storage class specifier (Static, Extern, or none).
+         * @return VarDeclaration pointer on success, nullptr on error.
+         */
+        [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
+                                                                 std::optional<StorageClass> storageClass);
 
         /**
          * @brief Create a return statement.
@@ -358,7 +423,7 @@ namespace mycc {
          * @param Literal String representation of the integer.
          * @return Pointer to the created IntegerLiteral node.
          */
-        IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
+        [[nodiscard]] IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -412,7 +477,7 @@ namespace mycc {
          * @param Name Variable name to look up.
          * @return Pointer to Var node with the unique name, or nullptr if undeclared.
          */
-        Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Create a conditional (ternary) expression.

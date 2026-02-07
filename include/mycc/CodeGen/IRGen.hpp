@@ -1,18 +1,28 @@
 #pragma once
 
 #include "mycc/AST/AST.hpp"
+#include "mycc/Sema/Scope.hpp"
 #include "mycc/IR/SimpleIR.hpp"
 
-namespace mycc {
-namespace codegen {
+#include <set>
+
+
+namespace mycc::codegen {
 
 class IRGenerator {
     ir::Context& Ctx;
     ir::Program& IRProg;
+    const Scope* Symbols = nullptr;  // GlobalSymbolTable for looking up variable attributes
+
+    // Current function name for generating unique static local names
+    std::string CurrentFunctionName;
 
     // Variable renaming for SSA-style naming
     unsigned int VariableCounter = 0;
     StringMap<std::vector<std::string>> VariableRenameStack;
+
+    // Track extern variables declared at block scope (refer to globals defined elsewhere)
+    std::set<std::string> ExternVariables;
 
     struct CaseInfo {
         Expr * value;
@@ -36,9 +46,13 @@ public:
         : Ctx(Ctx), IRProg(IRProg) {}
     
     // Convert AST Program to IR Program
-    void generateIR(const Program& ASTProgram);
+    void generateIR(const Program& ASTProgram, const Scope& symbols);
     
 private:
+
+    // Generate static variables from the Symbol tables in Scope
+    void convertSymbolsToTacky(const Scope& symbols);
+
     // Convert AST Function to IR Function
     ir::Function* generateFunction(const FunctionDeclaration& ASTFunc);
 
@@ -57,8 +71,8 @@ private:
     void generateDoWhileStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateForStmt(const Statement& Stmt, ir::Function* IRFunc);
     void generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc);
-    void generateCaseStmt(const Statement& Stmt, ir::Function* IRFunc);
-    void generateDefaultStmt(const Statement& Stmt, ir::Function* IRFunc);
+    void generateCaseStmt(const Statement& Stmt, ir::Function* IRFunc) const;
+    void generateDefaultStmt(const Statement& Stmt, ir::Function* IRFunc) const;
 
     // Convert AST Expression to IR Value
     ir::Value* generateExpression(const Expr& Expr, ir::Function * IRFunc = nullptr);
@@ -66,7 +80,7 @@ private:
     // Expression-specific generation methods
     ir::Value* generateVarExpression(const Var& VarExpr, ir::Function* IRFunc);
     ir::Value* generateAssignmentExpression(const AssignmentOperator& Assignment, ir::Function* IRFunc);
-    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc);
+    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc) const;
     ir::Value* generateUnaryExpression(const UnaryOperator& UnaryOp, ir::Function* IRFunc);
     ir::Value* generateBinaryExpression(const BinaryOperator& BinaryOp, ir::Function* IRFunc);
     ir::Value* generatePrefixExpression(const PrefixOperator& PrefixOp, ir::Function* IRFunc);
@@ -75,5 +89,4 @@ private:
     ir::Value* generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc);
 };
 
-}
 }

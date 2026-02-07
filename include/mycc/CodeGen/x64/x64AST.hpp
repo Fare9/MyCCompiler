@@ -12,9 +12,9 @@
 
 #include "x64AST.hpp"
 
-namespace mycc {
-namespace codegen {
-namespace x64 {
+
+
+namespace mycc::codegen::x64 {
 
 enum class X64ConditionTypeE {
     E,  // Equal
@@ -27,10 +27,12 @@ enum class X64ConditionTypeE {
 
 class X64Program;
 class X64Function;
+class X64StaticVar;
 class X64Instruction;
 class X64Register;
 class X64Operand;
 
+using X64StaticVars = std::vector<X64StaticVar*>;
 using X64Functions = std::vector<X64Function*>;
 using X64Instructions = std::deque<X64Instruction*>;
 
@@ -168,7 +170,7 @@ public:
     
 private:
     llvm::APSInt Offset;
-    X64Register * StackReg;
+    X64Register * StackReg = nullptr;
     Size AccessSize;
     
 public:
@@ -239,6 +241,22 @@ public:
         }
         ins += "]";
         return ins;
+    }
+};
+
+class X64Data : public X64Operand {
+    std::string Name;
+public:
+    X64Data() = default;
+
+    X64Data(StringRef Name) : Name(Name) {}
+
+    [[nodiscard]] StringRef getName() const {
+        return Name;
+    }
+
+    [[nodiscard]] std::string to_string() const override {
+        return "dword ptr [rip + " + Name + "]";
     }
 };
 
@@ -575,6 +593,8 @@ public:
             case Sar:
                 opcode = "sar";
                 break;
+            default:
+                break;
         }
         return opcode + " "
             + dst->to_string() +", "
@@ -585,8 +605,6 @@ public:
 class X64IDiv : public X64Instruction {
     X64Operand * Op;
 public:
-    X64IDiv() = default;
-
     X64IDiv(X64Operand * Op) :
         Op(Op) {
     }
@@ -776,7 +794,13 @@ public:
         Operands.emplace_back(stackVal);
         return stackVal;
     }
-    
+
+    X64Data* createData(StringRef Name) {
+        auto* x64Data = new X64Data(Name);
+        Operands.emplace_back(x64Data);
+        return x64Data;
+    }
+
     // Register allocation methods
     void allocateReg(unsigned pseudoID, PhysicalRegister::PhysReg physReg) {
         RegAllocation[pseudoID] = physReg;
@@ -954,18 +978,44 @@ public:
     }
 };
 
+class X64StaticVar {
+    std::string Name;
+    bool global;
+    int init_value;
+public:
+    explicit X64StaticVar(StringRef Name) : Name(Name), global(true), init_value(0) {}
+
+    X64StaticVar(StringRef Name, bool global) : Name(Name), global(global), init_value(0) {}
+
+    X64StaticVar(StringRef Name, bool global, int init_value) : Name(Name), global(global), init_value(init_value) {}
+
+    [[nodiscard]] StringRef getName() const { return Name; }
+
+    [[nodiscard]] bool isGlobal() const { return global; }
+
+    [[nodiscard]] int getInitValue() const { return init_value; }
+};
+
 class X64Function {
     X64Instructions Instrs;
     StringRef FuncName;
+    bool global = true;
     std::unique_ptr<X64Context> Ctx;
-    
+
 public:
     X64Function() : Ctx(std::make_unique<X64Context>()) {}
     explicit X64Function(StringRef Name) : FuncName(Name), Ctx(std::make_unique<X64Context>()) {
     }
 
+    X64Function(StringRef Name, bool global) : FuncName(Name), global(global), Ctx(std::make_unique<X64Context>()) {
+    }
+
     X64Function(X64Instructions & Instrs, StringRef Name) :
-        Instrs(std::move(Instrs)), FuncName(Name), Ctx(std::make_unique<X64Context>()) {
+        Instrs(std::move(Instrs)), FuncName(Name), global(true), Ctx(std::make_unique<X64Context>()) {
+    }
+
+    X64Function(X64Instructions & Instrs, StringRef Name, bool global) :
+        Instrs(std::move(Instrs)), FuncName(Name), global(global), Ctx(std::make_unique<X64Context>()) {
     }
 
     X64Context& getContext() { 
@@ -974,6 +1024,10 @@ public:
     
     [[nodiscard]] StringRef get_name() const {
         return FuncName;
+    }
+
+    [[nodiscard]] bool isGlobal() const {
+        return global;
     }
 
     [[nodiscard]] size_t size() const {
@@ -1026,6 +1080,7 @@ public:
 
 class X64Program {
     X64Functions Funcs;
+    X64StaticVars StaticVars;
     StringRef Name;
 public:
     X64Program() = default;
@@ -1036,9 +1091,15 @@ public:
         Funcs(std::move(Funcs)), Name(Name) {
     }
 
+    X64Program(X64Functions & Funcs, X64StaticVars & StaticVars, StringRef Name) :
+        Funcs(std::move(Funcs)), StaticVars(std::move(StaticVars)), Name(Name) {}
+
     ~X64Program() {
         for (auto & F : Funcs) {
             delete F;
+        }
+        for (auto & S : StaticVars) {
+            delete S;
         }
     }
 
@@ -1058,6 +1119,10 @@ public:
         Funcs.push_back(F);
     }
 
+    void add_static_var(X64StaticVar * S) {
+        StaticVars.push_back(S);
+    }
+
     X64Functions::iterator begin() {
         return Funcs.begin();
     }
@@ -1073,8 +1138,24 @@ public:
     [[nodiscard]] X64Functions::const_iterator end() const {
         return Funcs.end();
     }
+
+    X64StaticVars::iterator staticVars_begin() {
+        return StaticVars.begin();
+    }
+
+    X64StaticVars::iterator staticVars_end() {
+        return StaticVars.end();
+    }
+
+    [[nodiscard]] X64StaticVars::const_iterator staticVars_begin() const {
+        return StaticVars.begin();
+    }
+
+    [[nodiscard]] X64StaticVars::const_iterator staticVars_end() const {
+        return StaticVars.end();
+    }
 };
 
 }
-}
-}
+
+

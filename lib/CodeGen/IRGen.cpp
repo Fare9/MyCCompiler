@@ -1,18 +1,64 @@
 #include "mycc/CodeGen/IRGen.hpp"
+
+#include <set>
+
 #include "llvm/Support/Casting.h"
 
 using namespace mycc;
 using namespace mycc::codegen;
 
-void IRGenerator::generateIR(const Program &ASTProgram) {
+void IRGenerator::generateIR(const Program &ASTProgram, const Scope& symbols) {
+    // Store symbol table for lookups during expression generation
+    Symbols = &symbols;
+
     // Convert each AST function to IR function
-    for (const FunctionDeclaration *ASTFunc: ASTProgram) {
-        ir::Function *IRFunc = generateFunction(*ASTFunc);
-        IRProg.add_function(IRFunc);
+    for (const auto& decl : ASTProgram) {
+        if (const auto *ASTFunc = std::get_if<FunctionDeclaration *>(&decl)) {
+            ir::Function *IRFunc = generateFunction(**ASTFunc);
+            IRProg.add_function(IRFunc);
+        }
+    }
+
+    // After processing the AST, convert symbol table entries to static variables
+    // Important: Process AST first, then symbol table (matters in Chapter 16+)
+    convertSymbolsToTacky(symbols);
+}
+
+void IRGenerator::convertSymbolsToTacky(const Scope& symbols) {
+    std::set<std::string> StaticVars;
+
+    for (const auto& [name, entry] : symbols.getSymbols()) {
+        // Skip if not a static variable (functions and local vars are skipped)
+        if (!entry.isStaticAttr()) {
+            continue;
+        }
+
+        const StaticAttr* staticAttr = entry.getStaticAttr();
+
+        // Skip if NoInitializer (extern declaration, defined elsewhere)
+        if (staticAttr->init == InitialValue::NoInitializer) {
+            continue;
+        }
+
+        // Determine initial value
+        int initValue = 0;
+        if (staticAttr->init == InitialValue::Initial && staticAttr->value.has_value()) {
+            initValue = static_cast<int>(staticAttr->value.value());
+        }
+        // Tentative definitions get initialized to 0 (already default)
+
+        // Create the StaticVariable and add to program (avoid duplicates)
+        if (StaticVars.insert(name.str()).second) {
+            auto* staticVar = new ir::StaticVariable(name, staticAttr->global, initValue);
+            IRProg.add_static_variable(staticVar);
+        }
     }
 }
 
 ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) {
+    // Set current function name for static local name generation
+    CurrentFunctionName = ASTFunc.getName().str();
+
     // Create IR function arguments first
     ir::Args args;
 
@@ -39,7 +85,7 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
 
     // Now create the IR function with the parameters
     ir::InstList instructions;
-    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args);
+    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args, ASTFunc.isGlobal());
 
     bool containsReturn = false;
 
@@ -152,6 +198,29 @@ void IRGenerator::generateStatement(const Statement &Stmt, ir::Function *IRFunc)
 void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *IRFunc) {
     const auto *left = Decl.getVar();
     StringRef originalName = left->getName();
+
+    // For extern declarations at block scope, map to the global variable name
+    // (no unique name, no initialization - it refers to a global defined elsewhere)
+    if (Decl.getStorageClass().has_value() &&
+        Decl.getStorageClass().value() == StorageClass::SC_Extern) {
+        // Push the original name (global variable) onto the rename stack
+        VariableRenameStack[originalName].push_back(originalName.str());
+        // Track this as an extern variable (refers to global defined elsewhere)
+        ExternVariables.insert(originalName.str());
+        return;
+    }
+
+    // For static local declarations, use the unique name stored in the declaration
+    // Static locals are initialized at compile time (in data segment), not at runtime
+    if (Decl.getStorageClass().has_value() &&
+        Decl.getStorageClass().value() == StorageClass::SC_Static) {
+        if (Decl.getUniqueName().has_value()) {
+            // Push the global unique name onto the rename stack
+            VariableRenameStack[originalName].push_back(Decl.getUniqueName().value());
+        }
+        // Don't generate copy instruction - initialization is in data segment
+        return;
+    }
 
     // Generate unique name for this variable
     std::string uniqueName = generateUniqueVarName(originalName);
@@ -342,7 +411,7 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
 
     // Different to While and DoWhile, in For we need
     // to set the label_continue, right before the
-    // post processing in the update of the variables.
+    // post-processing in the update of the variables.
     IRFunc->add_instruction(label_continue);
 
     // Generate update of the variables
@@ -412,13 +481,13 @@ void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc
     IRFunc->add_instruction(label_end);
 }
 
-void IRGenerator::generateCaseStmt(const Statement &Stmt, ir::Function *IRFunc) {
+void IRGenerator::generateCaseStmt(const Statement &Stmt, ir::Function *IRFunc) const {
     auto &caseStmt = dynamic_cast<const CaseStatement &>(Stmt);
     std::string caseLabel = std::string(caseStmt.get_label());
     IRFunc->add_instruction(Ctx.getOrCreateLabel(caseLabel, true));
 }
 
-void IRGenerator::generateDefaultStmt(const Statement &Stmt, ir::Function *IRFunc) {
+void IRGenerator::generateDefaultStmt(const Statement &Stmt, ir::Function *IRFunc) const {
     auto &defaultStmt = dynamic_cast<const DefaultStatement &>(Stmt);
     std::string defaultLabel = std::string(defaultStmt.get_label());
     IRFunc->add_instruction(Ctx.getOrCreateLabel(defaultLabel, true));
@@ -450,8 +519,42 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
 }
 
 ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFunc) {
-    // Look up the renamed name for this variable
-    std::string irName = getIRName(var.getName());
+    StringRef originalName = var.getName();
+
+    // First check the rename stack to get the current binding for this name
+    std::string irName = getIRName(originalName);
+
+    // If the IR name equals the original name, it might be a global/static variable
+    // (either because there's no local, or because an extern declaration is in scope)
+    if (irName == originalName.str()) {
+        // Check if it's a known extern variable (defined in another translation unit)
+        if (ExternVariables.count(irName)) {
+            return Ctx.getOrCreateStaticVar(originalName);
+        }
+
+        // Check for file-scope static variable (stored with original name)
+        if (Symbols) {
+            if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
+                if (entry->isStaticAttr()) {
+                    // File-scope static - use original name
+                    return Ctx.getOrCreateStaticVar(originalName);
+                }
+            }
+        }
+    }
+
+    // Check if irName is a static local variable (from rename stack)
+    // Static locals have unique names like "functionName.varName" or "functionName.varName.1"
+    if (Symbols) {
+        if (const SymbolEntry* entry = Symbols->lookupEntry(irName)) {
+            if (entry->isStaticAttr()) {
+                // Static local - use the unique name from rename stack
+                return Ctx.getOrCreateStaticVar(irName);
+            }
+        }
+    }
+
+    // Local variable - use renamed name from the stack
     return Ctx.getOrCreateVar(irName);
 }
 
@@ -466,7 +569,7 @@ ir::Value *IRGenerator::generateAssignmentExpression(const AssignmentOperator &a
     return varop;
 }
 
-ir::Value *IRGenerator::generateIntExpression(const IntegerLiteral &IntLit, ir::Function *IRFunc) {
+ir::Value *IRGenerator::generateIntExpression(const IntegerLiteral &IntLit, ir::Function *IRFunc) const {
     // Create integer constant in IR
     return Ctx.createInt(IntLit.getValue());
 }
@@ -547,7 +650,9 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
         case BinaryOperator::Bok_And:
         case BinaryOperator::Bok_Or:
         case BinaryOperator::BoK_None:
+        default:
             break;
+
     }
     // According to C standard the subexpressions of the same operation
     // are usually unsequenced, they can be evaluated in any order.
