@@ -27,12 +27,15 @@ namespace mycc {
     using BlockItems = std::vector<BlockItem>;
     using DeclarationList = std::vector<std::variant<FunctionDeclaration *, VarDeclaration *> >;
 
-    // Storage class specifiers
+    /// @brief Storage class specifiers that can appear on declarations
+    /// (`static` or `extern`).
     enum class StorageClass {
         SC_Static,
         SC_Extern,
     };
 
+    /// @brief Base class for all types in the AST. Uses a discriminator kind
+    /// to support LLVM-style RTTI (`classof`).
     class Type {
     public:
         enum TypeKind {
@@ -54,7 +57,7 @@ namespace mycc {
         [[nodiscard]] TypeKind getKind() const { return Kind; }
     };
 
-    // For primitive types: int, void, char, etc.
+    /// @brief Represents a built-in primitive type (e.g. `int`, `void`).
     class BuiltinType : public Type {
     public:
         enum BuiltinKind {
@@ -78,8 +81,8 @@ namespace mycc {
         }
     };
 
-    // Base classes
-
+    /// @brief Base class for all statement AST nodes. Each concrete statement
+    /// carries a StmtKind discriminator for LLVM-style RTTI.
     class Statement {
     public:
         enum StmtKind {
@@ -115,6 +118,8 @@ namespace mycc {
         }
     };
 
+    /// @brief Base class for all expression AST nodes. Each concrete expression
+    /// carries an ExprKind discriminator for LLVM-style RTTI.
     class Expr {
     public:
         enum ExprKind {
@@ -146,6 +151,8 @@ namespace mycc {
 
     // Statements and Expressions
 
+    /// @brief AST node for a `return` statement, optionally carrying a
+    /// return-value expression.
     class ReturnStatement : public Statement {
         Expr *RetVal;
 
@@ -164,6 +171,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an expression used as a statement (e.g. `foo();`).
     class ExpressionStatement : public Statement {
         Expr *expr;
 
@@ -182,6 +190,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an `if` statement with mandatory then-branch
+    /// and optional else-branch.
     class IfStatement : public Statement {
         Expr *condition;
         // mandatory in if
@@ -221,6 +231,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a compound statement (block): a brace-enclosed
+    /// sequence of statements and declarations.
     class CompoundStatement : public Statement {
         BlockItems block;
 
@@ -263,6 +275,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a label statement (`label:`), used as a target
+    /// for `goto`.
     class LabelStatement : public Statement {
         StringRef Label;
 
@@ -281,6 +295,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `goto label;` statement.
     class GotoStatement : public Statement {
         StringRef Label;
 
@@ -299,6 +314,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `break;` statement. The label is resolved
+    /// during semantic analysis to identify the enclosing loop or switch.
     class BreakStatement : public Statement {
         std::string label;
 
@@ -321,6 +338,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `continue;` statement. The label is resolved
+    /// during semantic analysis to identify the enclosing loop.
     class ContinueStatement : public Statement {
         std::string label;
 
@@ -343,6 +362,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `while (condition) body` loop.
     class WhileStatement : public Statement {
     private:
         // condition inside of while statement
@@ -379,6 +399,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `do body while (condition);` loop.
     class DoWhileStatement : public Statement {
         // Body of the do/while condition
         Statement *Body;
@@ -414,6 +435,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `for (init; condition; post) body` loop.
+    /// The init clause may be a declaration, an expression, or empty.
     class ForStatement : public Statement {
         ForInit Init; // This can be a Declaration, Expr, or nothing
         Expr *Condition; // Optional condition
@@ -453,6 +476,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `case expr:` label inside a switch statement.
     class CaseStatement : public Statement {
         Expr *Value; // Constant expression checked
         std::string label; // the label of the case for jumping
@@ -473,6 +497,7 @@ namespace mycc {
         [[nodiscard]] Expr *getValue() const { return Value; }
     };
 
+    /// @brief AST node for a `default:` label inside a switch statement.
     class DefaultStatement : public Statement {
         std::string label; // Internal label for Jumping
     public:
@@ -490,6 +515,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a `switch (expr) { ... }` statement. The body
+    /// is typically a CompoundStatement containing case/default labels.
     class SwitchStatement : public Statement {
         Expr *Condition; // Controlling expression
         Statement *Body; // Usually a switch will be a CompoundStatement containing case labels
@@ -515,6 +542,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a null (empty) statement: a bare `;`.
     class NullStatement : public Statement {
     public:
         explicit NullStatement() : Statement(SK_Null) {
@@ -527,6 +555,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an integer literal constant (e.g. `42`).
     class IntegerLiteral : public Expr {
         SMLoc Loc;
         llvm::APSInt Value;
@@ -548,6 +577,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a variable reference expression (an identifier
+    /// that refers to a declared variable).
     class Var : public Expr {
         SMLoc Loc;
         std::string Name;
@@ -570,6 +601,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a unary operator expression (complement `~`,
+    /// negate `-`, logical not `!`).
     class UnaryOperator : public Expr {
     public:
         enum UnaryOperatorKind {
@@ -607,6 +640,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a binary operator expression (arithmetic, bitwise,
+    /// relational, and logical operators like `+`, `<<`, `<`, `&&`, etc.).
     class BinaryOperator : public Expr {
     public:
         enum BinaryOpKind {
@@ -674,6 +709,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for an assignment expression (`lvalue = rvalue`),
+    /// including compound assignments that have been desugared.
     class AssignmentOperator : public Expr {
         SMLoc Loc;
         Expr *left;
@@ -699,6 +736,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a prefix increment/decrement expression
+    /// (`++x` or `--x`).
     class PrefixOperator : public Expr {
     public:
         enum PrefixOpKind {
@@ -735,6 +774,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a postfix increment/decrement expression
+    /// (`x++` or `x--`).
     class PostfixOperator : public Expr {
     public:
         enum PostfixOpKind {
@@ -771,6 +812,8 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a ternary conditional expression
+    /// (`condition ? left : right`).
     class ConditionalExpr : public Expr {
         Expr *condition;
         Expr *left;
@@ -800,6 +843,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a function call expression (`identifier(args...)`).
     class FunctionCallExpr : public Expr {
         SMLoc Loc;
         std::string identifier;
@@ -829,10 +873,11 @@ namespace mycc {
         }
     };
 
-    // Declaration
-
     using ArgsList = std::vector<Var *>;
 
+    /// @brief AST node for a variable declaration, with optional initializer
+    /// and storage class. Static local variables may carry a unique name
+    /// for code generation.
     class VarDeclaration {
         SMLoc Loc;
         Var *Name;
@@ -884,6 +929,9 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a function declaration or definition. A declaration
+    /// has no body; a definition has a body (list of block items). Supports
+    /// storage class specifiers for linkage control.
     class FunctionDeclaration {
         SMLoc Loc;
         StringRef Name;
@@ -978,6 +1026,8 @@ namespace mycc {
         }
     };
 
+    /// @brief Root AST node representing a full translation unit (compilation
+    /// unit). Contains all top-level declarations: functions and global variables.
     class Program {
         DeclarationList declarations;
 

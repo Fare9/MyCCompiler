@@ -88,6 +88,9 @@ namespace mycc {
     /// - Block-scope variables declared `static`
     /// - Block-scope variables declared `extern` (refer to a global)
     ///
+    /// Not included:
+    /// - Variables declared inside a function.
+    ///
     /// These variables live for the entire program execution and are stored
     /// in the data/bss segment, not on the stack.
     struct StaticAttr {
@@ -111,27 +114,38 @@ namespace mycc {
         std::variant<FunctionDeclaration *, VarDeclaration *> decl;
         IdentifierAttrs attrs;
 
-        // Constructor for functions
+        /// @brief Construct a SymbolEntry for a function declaration.
+        /// @param func pointer to the function declaration AST node.
+        /// @param linkage linkage kind (External or Static).
+        /// @param scope scope type where the declaration appears.
         SymbolEntry(FunctionDeclaration *func, Linkage linkage, ScopeType scope)
             : decl(func) {
-            bool global = (linkage == Linkage::External);
-            bool defined = func->hasBody();
+            const bool global = (linkage == Linkage::External);
+            const bool defined = func->hasBody();
             attrs = FunAttr{defined, global};
         }
 
-        // Constructor for variables
+        /// @brief Construct a SymbolEntry for a variable declaration.
+        /// Determines whether the variable has static or automatic storage
+        /// duration and sets the appropriate attributes.
+        /// @param var pointer to the variable declaration AST node.
+        /// @param linkage linkage kind (External, Static, or None).
+        /// @param scope scope type where the declaration appears.
         SymbolEntry(VarDeclaration *var, Linkage linkage, ScopeType scope)
             : decl(var) {
             bool global = (linkage == Linkage::External);
 
             // Check if it has static storage duration
+            // - Declared globally
+            // - or Declared static (anywhere)
+            // - or Declared extern (anywhere)
             bool hasStaticStorage = (scope == ScopeType::Global) ||
                                     (var->getStorageClass() == StorageClass::SC_Static) ||
                                     (var->getStorageClass() == StorageClass::SC_Extern);
 
             if (hasStaticStorage) {
                 InitialValue init;
-                std::optional<int64_t> value = std::nullopt;
+                const std::optional<int64_t> value = std::nullopt;
 
                 if (var->getExpr() != nullptr) {
                     init = InitialValue::Initial;
@@ -148,86 +162,152 @@ namespace mycc {
             }
         }
 
-        // Helper methods to access attributes
-
+        /// @brief Check whether this entry holds a function declaration.
+        /// @return `true` if the entry is a function, `false` otherwise.
         [[nodiscard]] bool isFunction() const {
             return std::holds_alternative<FunctionDeclaration *>(decl);
         }
 
+        /// @brief Check whether the attributes are of function kind.
+        /// @return `true` if this entry has FunAttr, `false` otherwise.
         [[nodiscard]] bool isFunAttr() const {
             return std::holds_alternative<FunAttr>(attrs);
         }
 
+        /// @brief Check whether the attributes are of static-storage kind.
+        /// @return `true` if this entry has StaticAttr, `false` otherwise.
         [[nodiscard]] bool isStaticAttr() const {
             return std::holds_alternative<StaticAttr>(attrs);
         }
 
+        /// @brief Check whether the attributes are of local (automatic) kind.
+        /// @return `true` if this entry has LocalAttr, `false` otherwise.
         [[nodiscard]] bool isLocalAttr() const {
             return std::holds_alternative<LocalAttr>(attrs);
         }
 
+        /// @brief Get the function attributes, if present.
+        /// @return pointer to FunAttr, or nullptr if this is not a function entry.
         [[nodiscard]] const FunAttr* getFunAttr() const {
             return std::get_if<FunAttr>(&attrs);
         }
 
+        /// @brief Get the static-storage attributes, if present.
+        /// @return pointer to StaticAttr, or nullptr if not a static-storage entry.
         [[nodiscard]] const StaticAttr* getStaticAttr() const {
             return std::get_if<StaticAttr>(&attrs);
         }
 
-        // Convenience methods matching old interface
+        /// @brief Check whether this symbol has external linkage.
+        /// @return `true` if the symbol is globally visible, `false` otherwise.
         [[nodiscard]] bool isGlobal() const {
             if (auto *fa = getFunAttr()) return fa->global;
             if (auto *sa = getStaticAttr()) return sa->global;
             return false;  // LocalAttr is never global
         }
 
+        /// @brief Check whether this symbol has static storage duration.
+        /// @return `true` if the symbol lives for the entire program execution.
         [[nodiscard]] bool hasStaticStorage() const {
             return isStaticAttr();
         }
     };
 
+    /// @brief Scope represents a lexical scope in the program and holds a symbol
+    /// table mapping names to their declarations and attributes. Scopes form a
+    /// chain via parent pointers to support nested lookup.
     class Scope {
+        /// @brief Pointer to the enclosing scope, or nullptr for the global scope.
         Scope *parentScope;
+        /// @brief Symbol table mapping identifier names to their entries.
         StringMap<SymbolEntry> Symbols;
-
-        // Track variables declared in this scope (original names)
+        /// @brief Original names of identifiers declared in this scope (before renaming).
         std::vector<std::string> DeclaredIdentifiers;
 
     public:
-        Scope(Scope *parentScope = nullptr) : parentScope(parentScope) {
+        /// @brief Construct a new Scope.
+        /// @param parentScope pointer to the enclosing scope, or nullptr for the global scope.
+        explicit Scope(Scope *parentScope = nullptr) : parentScope(parentScope) {
         }
 
+        /// @brief Insert a variable declaration using the variable's own name as key.
+        /// @param declaration pointer to the variable declaration AST node.
+        /// @param linkage linkage kind for the variable.
+        /// @param scope scope type where the declaration appears.
+        /// @return `true` if insertion succeeded, `false` if the name already exists.
         bool insert(VarDeclaration *declaration, Linkage linkage, ScopeType scope);
 
+        /// @brief Insert a variable declaration under a specific key.
+        /// @param key the name to use as the symbol table key.
+        /// @param declaration pointer to the variable declaration AST node.
+        /// @param linkage linkage kind for the variable.
+        /// @param scope scope type where the declaration appears.
+        /// @return `true` if insertion succeeded, `false` if the key already exists.
         bool insert(StringRef key, VarDeclaration *declaration, Linkage linkage, ScopeType scope);
 
+        /// @brief Insert a function declaration using the function's own name as key.
+        /// @param funcDeclaration pointer to the function declaration AST node.
+        /// @param linkage linkage kind for the function.
+        /// @param scope scope type where the declaration appears.
+        /// @return `true` if insertion succeeded, `false` if the name already exists.
         bool insert(FunctionDeclaration *funcDeclaration, Linkage linkage, ScopeType scope);
 
+        /// @brief Insert a function declaration under a specific key.
+        /// @param key the name to use as the symbol table key.
+        /// @param funcDeclaration pointer to the function declaration AST node.
+        /// @param linkage linkage kind for the function.
+        /// @param scope scope type where the declaration appears.
+        /// @return `true` if insertion succeeded, `false` if the key already exists.
         bool insert(StringRef key, FunctionDeclaration *funcDeclaration, Linkage linkage, ScopeType scope);
 
-        // Lookup through scope chain (current scope + parent scopes)
+        /// @brief Look up a variable by name through the scope chain (current + parents).
+        /// @param Name the identifier name to search for.
+        /// @return pointer to the VarDeclaration if found, nullptr otherwise.
         VarDeclaration *lookupForVar(StringRef Name);
 
+        /// @brief Look up a function by name through the scope chain (current + parents).
+        /// @param Name the identifier name to search for.
+        /// @return pointer to the FunctionDeclaration if found, nullptr otherwise.
         FunctionDeclaration *lookupForFunction(StringRef Name);
 
-        // Lookup the SymbolEntry for a name (returns nullptr if not found)
+        /// @brief Look up a SymbolEntry by name through the scope chain.
+        /// @param Name the identifier name to search for.
+        /// @return pointer to the SymbolEntry if found, nullptr otherwise.
         [[nodiscard]] const SymbolEntry *lookupEntry(StringRef Name) const;
 
-        // Check if a symbol exists in the current scope only (not parent scopes)
+        /// @brief Check if a symbol exists in the current scope only (not parent scopes).
+        /// @param Name the identifier name to check.
+        /// @return `true` if the name is declared in this scope, `false` otherwise.
         [[nodiscard]] bool hasSymbolInCurrentScope(StringRef Name) const;
 
-        // Check if a symbol has a linkage conflict with an existing symbol
+        /// @brief Check if inserting a symbol with the given storage class would
+        /// create a linkage conflict with an existing symbol.
+        /// @param Name the identifier name to check.
+        /// @param newStorageClass the storage class of the new declaration.
+        /// @return `true` if there is a conflict, `false` otherwise.
         [[nodiscard]] bool hasLinkageConflict(StringRef Name, std::optional<StorageClass> newStorageClass) const;
 
-        // Update the attributes of an existing symbol entry (for file scope variable merging)
+        /// @brief Update the attributes of an existing symbol entry (used for
+        /// merging file-scope variable redeclarations).
+        /// @param Name the identifier name to update.
+        /// @param newAttrs the new static attributes to apply.
+        /// @return `true` if the entry was found and updated, `false` otherwise.
         bool updateSymbolEntry(StringRef Name, const StaticAttr &newAttrs);
 
+        /// @brief Record an identifier as declared in this scope.
+        /// @param originalName the original name of the identifier.
         void addDeclaredIdentifier(StringRef originalName);
 
+        /// @brief Get the list of identifiers declared in this scope.
+        /// @return const reference to the vector of declared identifier names.
         [[nodiscard]] const std::vector<std::string> &getDeclaredIdentifiers() const { return DeclaredIdentifiers; }
 
+        /// @brief Get the parent (enclosing) scope.
+        /// @return pointer to the parent scope, or nullptr if this is the global scope.
         [[nodiscard]] Scope *getParentScope() const { return parentScope; }
 
+        /// @brief Get the symbol table for this scope.
+        /// @return const reference to the symbol map.
         [[nodiscard]] const StringMap<SymbolEntry> &getSymbols() const { return Symbols; }
     };
 }

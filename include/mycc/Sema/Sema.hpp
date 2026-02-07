@@ -8,7 +8,6 @@
 #include <vector>
 #include <string>
 #include <set>
-#include <map>
 
 namespace mycc {
     /**
@@ -221,11 +220,11 @@ namespace mycc {
         void assignLoopLabels(FunctionDeclaration &F);
 
         /**
-         * @brief Create a Program node from a list of functions.
-         * @param Funcs List of functions in the program.
+         * @brief Create a Program node from a list of declarations.
+         * @param Decls List of declarations in the program.
          * @return Pointer to the created Program node.
          */
-        Program *actOnProgramDeclaration(DeclarationList &Funcs) const;
+        Program *actOnProgramDeclaration(DeclarationList &Decls) const;
 
         /**
          * @brief Create a Function node.

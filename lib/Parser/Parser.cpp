@@ -44,6 +44,48 @@ std::vector types = {
     tok::kw_int
 };
 
+bool Parser::parseDeclaration(DeclarationList &Decls) {
+    std::optional<StorageClass> storageClass;
+    Type *type = nullptr;
+    StringRef name;
+    SMLoc loc;
+
+    if (parseDeclarationHeader(storageClass, type, name, loc, true))
+        return true;
+
+    // Check if it's a function (has '(') or variable (has '=' or ';')
+    if (Tok.is(tok::l_paren)) {
+        // Function declaration
+        FunctionDeclaration *Func = nullptr;
+        if (!parseFunctionRest(Func, loc, name, storageClass))
+            return true;
+
+        // Check for duplicate declarations
+        bool add_to_decls = true;
+        for (const auto &decl: Decls) {
+            // if we find a declaration of same name and same arguments
+            // we skip it
+            if (const auto *existing_func = std::get_if<FunctionDeclaration *>(&decl)) {
+                if (Func->getName() == (*existing_func)->getName() &&
+                    Func->getArgs().size() == (*existing_func)->getArgs().size()) {
+                    add_to_decls = false;
+                    break;
+                }
+            }
+        }
+        if (add_to_decls)
+            Decls.emplace_back(Func);
+    } else {
+        // Variable declaration
+        VarDeclaration *Var = nullptr;
+        if (!parseGlobalVarRest(Var, loc, name, storageClass))
+            return true;
+
+        Decls.emplace_back(Var);
+    }
+    return false;
+}
+
 bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
                                     Type *&type,
                                     StringRef &name,
@@ -60,6 +102,7 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
                 return true;
             }
             if (Tok.is(tok::kw_extern)) {
+                // if someone used `extern` after `static`
                 if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Static) {
                     getDiagnostics().report(Tok.getLocation(),
                                             diag::err_declaration_already_static);
@@ -67,6 +110,7 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
                 }
                 storageClass = StorageClass::SC_Extern;
             } else if (Tok.is(tok::kw_static)) {
+                // if someone used `static` after `extern`
                 if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Extern) {
                     getDiagnostics().report(Tok.getLocation(),
                                             diag::err_declaration_already_extern);
@@ -75,6 +119,7 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
                 storageClass = StorageClass::SC_Static;
             }
         } else if (Tok.is(tok::kw_int)) {
+            // Check there's no double declaration
             if (type != nullptr) {
                 getDiagnostics().report(Tok.getLocation(),
                                         diag::err_declaration_has_type);
@@ -104,45 +149,6 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
     return false;
 }
 
-bool Parser::parseDeclaration(DeclarationList &Decls) {
-    std::optional<StorageClass> storageClass;
-    Type *type = nullptr;
-    StringRef name;
-    SMLoc loc;
-
-    if (parseDeclarationHeader(storageClass, type, name, loc, true))
-        return true;
-
-    // Check if it's a function (has '(') or variable (has '=' or ';')
-    if (Tok.is(tok::l_paren)) {
-        // Function declaration
-        FunctionDeclaration *Func = nullptr;
-        if (!parseFunctionRest(Func, loc, name, storageClass))
-            return true;
-
-        // Check for duplicate declarations
-        bool add_to_decls = true;
-        for (const auto &decl: Decls) {
-            if (const auto *existing_func = std::get_if<FunctionDeclaration *>(&decl)) {
-                if (Func->getName() == (*existing_func)->getName() &&
-                    Func->getArgs().size() == (*existing_func)->getArgs().size()) {
-                    add_to_decls = false;
-                    break;
-                }
-            }
-        }
-        if (add_to_decls)
-            Decls.emplace_back(Func);
-    } else {
-        // Variable declaration
-        VarDeclaration *Var = nullptr;
-        if (!parseGlobalVarRest(Var, loc, name, storageClass))
-            return true;
-
-        Decls.emplace_back(Var);
-    }
-    return false;
-}
 
 bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef funcName,
                                std::optional<StorageClass> storageClass) {
@@ -200,10 +206,12 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
     if (consume(tok::r_paren))
         return _errorhandler();
 
+    // Generate a new function or obtain a previous one
     F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass);
     if (!F)
         return _errorhandler();
 
+    // Parse body or just keep there
     if (Tok.is(tok::semi)) {
         advance();
     } else {
@@ -221,9 +229,9 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         parsedBody = true;
     }
 
-    Actions.exitFunction();
-
+    // Cleaning stuff
     Actions.exitScope();
+    Actions.exitFunction();
 
     if (parsedBody) {
         // Check for multiple definitions (redefinition error)
@@ -232,7 +240,8 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
             return _errorhandler();
         }
 
-        // Update args for the definition (parameter names from definition take precedence)
+        // Update args for the definition, we need the new names
+        // for when generating the body
         F->setArgs(args);
         F->setBody(body);
     }
@@ -320,6 +329,8 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
 
     // Parse optional initializer (variable now exists in scope)
+    // we need the variable in the scope because, the variable
+    // can it be used in the expression itself.
     Expr *initExpr = nullptr;
     if (Tok.is(tok::equal)) {
         advance();
@@ -772,6 +783,11 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     } else {
         if (!Actions.is_avoid_errors_active())
             return true;
+        // Next code in normal execution will never be run
+        // but we need it to pass all the parse tests, although
+        // semantically is not possible, for the parser it is
+        // not forbidden.
+
         // consume body
         if (consume(tok::l_brace))
             return true;

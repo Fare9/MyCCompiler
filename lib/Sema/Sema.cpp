@@ -448,9 +448,9 @@ void Sema::initialize() {
     GlobalSymbolTable = new Scope(nullptr);  // Separate table for IR generation
 }
 
-Program *Sema::actOnProgramDeclaration(DeclarationList &Funcs) const {
+Program *Sema::actOnProgramDeclaration(DeclarationList &Decls) const {
     auto *p = Context.createProgram<Program>();
-    p->add_functions(Funcs);
+    p->add_functions(Decls);
     return p;
 }
 
