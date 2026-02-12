@@ -5,6 +5,7 @@
 #include "mycc/IR/SimpleIR.hpp"
 #include "mycc/CodeGen/IRGen.hpp"
 #include "mycc/CodeGen/x64/X64CodeGen.hpp"
+#include "mycc/CodeGen/llvm/LLVMIRGen.hpp"
 
 
 #include "mycc/AST/AST.hpp"
@@ -27,6 +28,7 @@ bool parser = false;
 bool semantic = false;
 bool tacky = false;
 bool codegen = false;
+bool llvm_gen = false;
 bool object = false;
 bool compile = false;
 bool print_output = false;
@@ -45,6 +47,7 @@ void print_help() {
               << "  --validate Run semantic analysis on top of parser\n"
               << "  --tacky    Run lexer, parser and generate IR\n"
               << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
+              << "  --llvm     Generate LLVM IR\n"
               << "  -c         Instruct the compiler driver to generate an object file\n"
               << "  --help     Show this help message\n"
               << "If no option is provided, all the steps will run and the output assembly is generated.\n";
@@ -70,6 +73,7 @@ int main(int argc, char **argv) {
             {"--codegen", [&]() {
                 codegen = true;
             }},
+            {"--llvm", [&]() {llvm_gen = true;}},
             {"-c", [&]() { object = true; }},
             {"--print",   [&]() { print_output = true; }},
             // other options
@@ -85,7 +89,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!lexer && !parser && !tacky && !codegen) compile = true;
+    if (!lexer && !parser && !tacky && !codegen && !llvm_gen) compile = true;
 
     for (const auto &F: InputFiles) {
         llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
@@ -173,6 +177,38 @@ int main(int argc, char **argv) {
             if (print_output) {
                 std::cout << "Assembly output:\n" << x64CodeGen.generateAssembly() << std::endl;
             }
+        }
+        if (llvm_gen) {
+            mycc::Program* p = Parser.parse();
+            Lexer.reset();
+            if (!p) {
+                std::cerr << "mycc: error: parse error encountered\n";
+                std::cerr << "mycc: fatal error: code generation failed due to parse errors\n";
+                std::cerr << "compilation terminated.\n";
+                return 3;
+            }
+            llvm::LLVMContext LLVMCtx;
+            mycc::codegen::llvmbackend::LLVMIRGenerator LLVMGen(LLVMCtx, F);
+            LLVMGen.generateIR(*p, Sema.getGlobalSymbolTable());
+            if (print_output) {
+                LLVMGen.print(llvm::outs());
+            }
+
+            // Write LLVM IR to .ll file
+            std::string ll_name = F;
+            if (ll_name.ends_with(".c"))
+                ll_name.replace(ll_name.length() - 2, 2, ".ll");
+            else
+                ll_name += ".ll";
+
+            std::error_code EC;
+            llvm::raw_fd_ostream OutFile(ll_name, EC);
+            if (EC) {
+                std::cerr << "mycc: error: could not open output file '" << ll_name << "': " << EC.message() << "\n";
+                return 4;
+            }
+            LLVMGen.print(OutFile);
+            std::cout << "LLVM output: " << ll_name << '\n';
         }
         if (compile) {
             mycc::Program* p = Parser.parse();

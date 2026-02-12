@@ -28,6 +28,14 @@ class LLVMIRGenerator {
     /// @brief Map from variable names to their LLVM alloca/global addresses.
     llvm::StringMap<llvm::Value *> NamedValues;
 
+    /// @brief Pointer to store the block where a continue must jump
+    std::vector<llvm::BasicBlock *> ContinueBlocks;
+
+    /// @brief Pointer to store the block where a break must jump
+    std::vector<llvm::BasicBlock *> BreakBlocks;
+
+    /// @brief Map from goto label names to their BasicBlocks.
+    llvm::StringMap<llvm::BasicBlock *> LabelBlocks;
 public:
 
      /// @brief Constructor of the LLVM IR Generator, we need a context and the name
@@ -71,7 +79,7 @@ private:
 
     // Expressions
     llvm::Value *generateExpression(const Expr &E);
-    llvm::Value *generateIntLiteral(const IntegerLiteral &Lit);
+    [[nodiscard]] llvm::Value *generateIntLiteral(const IntegerLiteral &Lit) const;
     llvm::Value *generateVarExpr(const Var &V);
     llvm::Value *generateUnaryExpr(const UnaryOperator &Op);
     llvm::Value *generateBinaryExpr(const BinaryOperator &Op);
@@ -81,6 +89,10 @@ private:
     llvm::Value *generateConditionalExpr(const ConditionalExpr &Op);
     llvm::Value *generateFunctionCallExpr(const FunctionCallExpr &Call);
 
+    // Short-circuit helpers
+    llvm::Value *generateLogicalAnd(const BinaryOperator &Op);
+    llvm::Value *generateLogicalOr(const BinaryOperator &Op);
+
     // Helpers
     llvm::Type *getLLVMType(const Type *T) const;
 
@@ -89,6 +101,7 @@ private:
     static llvm::AllocaInst *createEntryBlockAlloca(llvm::Function *F,
                                                     llvm::StringRef Name,
                                                     llvm::Type *Ty);
+    llvm::Value *getVarAddress(const Var& V);
 };
 
 } // namespace mycc::codegen::llvmbackend
