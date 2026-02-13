@@ -66,6 +66,8 @@ void LLVMIRGenerator::generateFunction(const FunctionDeclaration &Func, const Sy
     }
 
     // If the last block has no terminator, add an implicit return
+    // we can use the type of the function for generating the return
+    // value
     if (!Builder.GetInsertBlock()->getTerminator()) {
         if (LLVMFunc->getReturnType()->isVoidTy())
             Builder.CreateRetVoid();
@@ -225,11 +227,33 @@ void LLVMIRGenerator::generateIfStmt(const IfStatement &Stmt) {
 }
 
 void LLVMIRGenerator::generateCompoundStmt(const CompoundStatement &Stmt) {
+    // We need to keep track of the names, so when we go to nested
+    // statements, we have different names
+    llvm::StringMap<llvm::Value *> SavedValues;
+    std::vector<llvm::StringRef> DeclaredNames;
     for (const auto & S : Stmt) {
         if (std::holds_alternative<Statement*>(S)) {
             generateStatement(*std::get<Statement*>(S));
         } else if (std::holds_alternative<VarDeclaration*>(S)) {
-            generateDeclaration(*std::get<VarDeclaration*>(S));
+            auto *Decl = std::get<VarDeclaration*>(S);
+            auto Name= Decl->getVar()->getName();
+            // We save the current name so it is not overwritten
+            auto it = NamedValues.find(Name);
+            if (it != NamedValues.end()) {
+                SavedValues[Name] = it->second;
+            }
+            DeclaredNames.push_back(Name);
+            generateDeclaration(*Decl);
+        }
+    }
+
+    // We now restore the shadowed names, remove names that weren't shadowing
+    for (auto &Name : DeclaredNames) {
+        auto it = SavedValues.find(Name);
+        if (it != SavedValues.end()) {
+            NamedValues[Name] = it->second; // restore the previous one
+        } else {
+            NamedValues.erase(Name); // just remove the name
         }
     }
 }
