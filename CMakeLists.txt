@@ -28,3 +28,6 @@ target_link_libraries(mycc
         Parser
         ASTPrinter
         CodeGen)
+
+enable_testing()
+add_subdirectory(test/LLVM)
