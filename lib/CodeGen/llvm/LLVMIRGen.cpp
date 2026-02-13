@@ -18,38 +18,36 @@ void LLVMIRGenerator::print(llvm::raw_ostream &OS) const {
 }
 
 void LLVMIRGenerator::generateGlobals(const Scope &symbols) {
+    // Pass 1: declare all functions and global variables (signatures only)
+    for (const auto &[Name, Decl] : symbols.getSymbols()) {
+        if (Decl.isFunction()) {
+            auto &Func = *std::get<FunctionDeclaration *>(Decl.decl);
+            std::vector<llvm::Type*> ParamTypes(Func.getArgs().size(), llvm::Type::getInt32Ty(Ctx));
+            auto *RetType = llvm::Type::getInt32Ty(Ctx);
+            auto *FnTy = llvm::FunctionType::get(RetType, ParamTypes, false);
+            auto *LLVMFunc = llvm::Function::Create(FnTy, getLinkage(Decl), Func.getName(), Module.get());
+            unsigned i = 0;
+            for (auto &Arg : LLVMFunc->args())
+                Arg.setName(Func.getArgs()[i++]->getName());
+        } else {
+            generateGlobalVar(*std::get<VarDeclaration *>(Decl.decl), Decl);
+        }
+    }
+
+    // Pass 2: generate function bodies
     for (const auto &[Name, Decl] : symbols.getSymbols()) {
         if (Decl.isFunction()) {
             generateFunction(*std::get<FunctionDeclaration *>(Decl.decl), Decl);
-        } else {
-            generateGlobalVar(*std::get<VarDeclaration *>(Decl.decl), Decl);
         }
     }
 }
 
 void LLVMIRGenerator::generateFunction(const FunctionDeclaration &Func, const SymbolEntry& Entry) {
-    // We first need to build the FunctionType, for that we will
-    // need the return type, and the parameter types.
-    // As we are now using only `int` we can assign the types directly.
-    std::vector<llvm::Type*> ParamTypes(Func.getArgs().size(), llvm::Type::getInt32Ty(Ctx));
-    auto *RetType = llvm::Type::getInt32Ty(Ctx);
-    auto *FnTy = llvm::FunctionType::get(RetType, ParamTypes, false);
-
-    // Now create the function in the module
-    auto *LLVMFunc = llvm::Function::Create(FnTy, // Type of the function
-        getLinkage(Entry), // linkage for that function
-        Func.getName(),
-        Module.get());
-    // Name the parameters using the names from the AST
-    unsigned i = 0;
-    const auto& FuncArgs = Func.getArgs();
-    for (auto &Arg : LLVMFunc->args()) {
-        Arg.setName(FuncArgs[i]->getName());
-        i++;
-    }
-
-    // If it is only a declaration we stop here
+    // If it is only a declaration, it was already created in pass 1
     if (Func.isDeclaration()) return;
+
+    // Retrieve the function created in pass 1
+    auto *LLVMFunc = Module->getFunction(Func.getName());
 
     // Create entry block and set insertion point
     auto *EntryBB = llvm::BasicBlock::Create(Ctx, "entry", LLVMFunc);
@@ -65,6 +63,14 @@ void LLVMIRGenerator::generateFunction(const FunctionDeclaration &Func, const Sy
 
     for (const auto &Item : Func) {
         generateBlockItem(Item);
+    }
+
+    // If the last block has no terminator, add an implicit return
+    if (!Builder.GetInsertBlock()->getTerminator()) {
+        if (LLVMFunc->getReturnType()->isVoidTy())
+            Builder.CreateRetVoid();
+        else
+            Builder.CreateRet(llvm::ConstantInt::get(LLVMFunc->getReturnType(), 0));
     }
 }
 
