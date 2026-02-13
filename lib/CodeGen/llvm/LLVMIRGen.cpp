@@ -187,14 +187,14 @@ void LLVMIRGenerator::generateIfStmt(const IfStatement &Stmt) {
     auto *CondVal = generateExpression(*Stmt.getCondition());
     auto *Func = Builder.GetInsertBlock()->getParent();
 
-    auto *EndBB = llvm::BasicBlock::Create(Ctx, "if.end", Func);
     auto *ThenBB = llvm::BasicBlock::Create(Ctx, "if.then", Func);
-    llvm::BasicBlock *ElseBB = nullptr;
+    llvm::BasicBlock *ElseBB = Stmt.getElseSt() ? ElseBB = llvm::BasicBlock::Create(Ctx, "if.else", Func) : nullptr;
+    auto *EndBB = llvm::BasicBlock::Create(Ctx, "if.end", Func);
+
 
     auto* Cond= Builder.CreateICmpNE(CondVal, llvm::ConstantInt::get(CondVal->getType(), 0));
 
     if (Stmt.getElseSt()) {
-        ElseBB = llvm::BasicBlock::Create(Ctx, "if.else", Func);
         Builder.CreateCondBr(Cond, ThenBB, ElseBB);
     }
     else {
@@ -231,9 +231,9 @@ void LLVMIRGenerator::generateCompoundStmt(const CompoundStatement &Stmt) {
 void LLVMIRGenerator::generateWhileStmt(const WhileStatement &Stmt) {
     auto * Func = Builder.GetInsertBlock()->getParent();
 
-    auto *EndBr = llvm::BasicBlock::Create(Ctx, "while.end", Func);
-    auto *WhileBody = llvm::BasicBlock::Create(Ctx, "while.body", Func);
     auto *WhileHeader = llvm::BasicBlock::Create(Ctx, "while.header", Func);
+    auto *WhileBody = llvm::BasicBlock::Create(Ctx, "while.body", Func);
+    auto *EndBr = llvm::BasicBlock::Create(Ctx, "while.end", Func);
 
     ContinueBlocks.emplace_back(WhileHeader);
     BreakBlocks.emplace_back(EndBr);
@@ -260,9 +260,9 @@ void LLVMIRGenerator::generateWhileStmt(const WhileStatement &Stmt) {
 void LLVMIRGenerator::generateDoWhileStmt(const DoWhileStatement &Stmt) {
     auto * Func = Builder.GetInsertBlock()->getParent();
 
-    auto * DoWhileEnd = llvm::BasicBlock::Create(Ctx, "dowhile.end", Func);
     auto * DoWhileBody = llvm::BasicBlock::Create(Ctx, "dowhile.body", Func);
     auto * DoWhileComparison = llvm::BasicBlock::Create(Ctx, "dowhile.comp", Func);
+    auto * DoWhileEnd = llvm::BasicBlock::Create(Ctx, "dowhile.end", Func);
 
     ContinueBlocks.push_back(DoWhileComparison);
     BreakBlocks.push_back(DoWhileEnd);
@@ -492,7 +492,7 @@ llvm::Value *LLVMIRGenerator::generateExpression(const Expr &E) {
 }
 
 llvm::Value *LLVMIRGenerator::generateIntLiteral(const IntegerLiteral &Lit) const {
-    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), Lit.getValue());
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), Lit.getValue().getSExtValue());
 }
 
 llvm::Value *LLVMIRGenerator::generateVarExpr(const Var &V) {
