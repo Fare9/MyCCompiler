@@ -47,7 +47,8 @@ The project is organized into several key components, each responsible for a spe
 - **Location**: `include/mycc/CodeGen/` and `lib/CodeGen/`
 - **Files**: `IRGen.hpp`, `IRGen.cpp`
 - **Subdirectory**: `x64/` containing `X64CodeGen.hpp`, `x64AST.hpp`, `X64CodeGen.cpp`
-- **Purpose**: Transforms IR to target-specific assembly code (x86-64)
+- **Subdirectory**: `llvm/` containing `LLVMIRGen.hpp`, `LLVMIRGen.cpp`
+- **Purpose**: Transforms IR to target-specific assembly code (x86-64) or LLVM IR
 
 ### Support Components
 
@@ -89,6 +90,10 @@ make
 # Print output to console
 ./mycc --print input.c        # Show assembly output
 ./mycc --tacky --print input.c # Show IR output
+
+# Generate LLVM IR
+./mycc --llvm input.c         # Outputs input.ll
+./mycc --llvm --print input.c # Show LLVM IR output
 ```
 
 ## Dependencies
@@ -124,5 +129,6 @@ The compiler currently supports:
   - Label uniqueness and goto target validation
   - Declaration placement validation (labels must precede statements, not declarations)
 - x86-64 assembly generation with Intel syntax
+- LLVM IR code generation as an alternative backend
 
 For detailed technical information about the compiler's architecture and implementation, see [TECHNICAL.md](Documentation/TECHNICAL.md).

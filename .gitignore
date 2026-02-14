@@ -38,6 +38,8 @@ Thumbs.db
 
 # Test outputs
 *.out
+*.ll
+Testing/
 
 # Subprojects/external repos
 writing-a-c-compiler-tests/

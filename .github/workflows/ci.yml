@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/llvm.gpg > /dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-18 main" | sudo tee /etc/apt/sources.list.d/llvm-18.list
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev clang-18 libfmt-dev cmake
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-18/cmake
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run LLVM IR tests
+        run: cd build && ctest --output-on-failure
