@@ -1,5 +1,6 @@
 
 #include "mycc/CodeGen/llvm/LLVMIRGen.hpp"
+#include "llvm/IR/Verifier.h"
 
 using namespace mycc::codegen::llvmbackend;
 
@@ -11,6 +12,10 @@ LLVMIRGenerator::LLVMIRGenerator(llvm::LLVMContext &Ctx, llvm::StringRef ModuleN
 
 void LLVMIRGenerator::generateIR(const Program &ASTProgram, const Scope &symbols) {
     generateGlobals(symbols);
+
+    if (llvm::verifyModule(*Module, &llvm::errs())) {
+        llvm::errs() << "mycc error: LLVM module verification failed\n";
+    }
 }
 
 void LLVMIRGenerator::print(llvm::raw_ostream &OS) const {
