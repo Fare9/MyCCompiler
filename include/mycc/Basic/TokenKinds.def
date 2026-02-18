@@ -73,6 +73,7 @@ PUNCTUATOR(interrogation, "?")
 KEYWORD(int, KEYALL)            // Fixed: should be lowercase 'int'
 KEYWORD(char, KEYALL)           // Added char type
 KEYWORD(void, KEYALL)           // Added void type
+KEYWORD(long, KEYALL)           // Added long type
 KEYWORD(if, KEYALL)             // Added control flow
 KEYWORD(else, KEYALL)
 KEYWORD(while, KEYALL)
