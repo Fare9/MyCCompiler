@@ -236,7 +236,7 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
     if (parsedBody) {
         // Check for multiple definitions (redefinition error)
         if (F->hasBody() && !Actions.is_avoid_errors_active()) {
-            getDiagnostics().report(funcLoc, diag::err_function_redefinition, funcName);
+            getDiagnostics().report(funcLoc, diag::err_function_redefinition, funcName.str());
             return _errorhandler();
         }
 
@@ -805,7 +805,7 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
     if (parsedBody) {
         // Check for multiple definitions (redefinition error)
         if (F->hasBody()) {
-            getDiagnostics().report(Loc, diag::err_function_redefinition, Name);
+            getDiagnostics().report(Loc, diag::err_function_redefinition, Name.str());
             return true;
         }
 

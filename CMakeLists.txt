@@ -13,6 +13,8 @@ include_directories(${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
+llvm_map_components_to_libnames(llvm_libs core support)
+
 include_directories(include)
 
 add_subdirectory(lib)
@@ -20,14 +22,14 @@ add_subdirectory(lib)
 add_executable(mycc main.cpp)
 
 target_link_libraries(mycc
-        LLVM
         fmt::fmt
         Basic
         Lexer
         Sema
         Parser
         ASTPrinter
-        CodeGen)
+        CodeGen
+        ${llvm_libs})
 
 enable_testing()
 add_subdirectory(test/LLVM)
