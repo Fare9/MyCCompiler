@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 #include <optional>
+#include <memory>
 #include <fmt/core.h>
 
 #include "AST.hpp"
@@ -62,6 +63,7 @@ namespace mycc {
     public:
         enum BuiltinKind {
             Int,
+            Long,
             Void,
             // For the moment, we can include in the future more
         };
@@ -78,6 +80,33 @@ namespace mycc {
 
         static bool classof(const Type *T) {
             return T->getKind() == TK_Builtin;
+        }
+    };
+
+    /// @brief Represents a Function type, it contains return types, and argument types.
+    class FunctionType : public Type {
+        std::unique_ptr<Type> retType;
+        std::vector<Type> argType;
+
+    public:
+        FunctionType(std::unique_ptr<Type> retType, std::vector<Type> argType) : Type(TK_Function),
+            retType(std::move(retType)), argType(std::move(argType)) {
+        }
+
+        ~FunctionType() override = default;
+
+        /// @return reference to the return type
+        [[nodiscard]] const Type &getReturnType() const {
+            return *retType;
+        }
+
+        /// @return reference to the vector with the argument types
+        [[nodiscard]] const std::vector<Type> &getArgTypes() const {
+            return argType;
+        }
+
+        static bool classof(const Type *T) {
+            return T->getKind() == TK_Function;
         }
     };
 
@@ -124,6 +153,7 @@ namespace mycc {
     public:
         enum ExprKind {
             Ek_Int,
+            Ek_Long,
             Ek_Var,
             Ek_UnaryOperator,
             Ek_BinaryOperator,
@@ -132,6 +162,7 @@ namespace mycc {
             Ek_PostfixOperator,
             Ek_ConditionalOperator,
             Ek_FunctionCallOperator,
+            Ek_Cast,
         };
 
     private:
@@ -577,6 +608,26 @@ namespace mycc {
         }
     };
 
+    class LongLiteral : public Expr {
+        SMLoc Loc;
+        llvm::APSInt Value;
+    public:
+        LongLiteral(SMLoc Loc, llvm::APSInt Value) : Expr(Ek_Long), Loc(Loc), Value(std::move(Value)) {
+        }
+
+        llvm::APSInt &getValue() {
+            return Value;
+        }
+
+        [[nodiscard]] const llvm::APSInt &getValue() const {
+            return Value;
+        }
+
+        static bool classof(const Expr *E) {
+            return E->getKind() == Ek_Long;
+        }
+    };
+
     /// @brief AST node for a variable reference expression (an identifier
     /// that refers to a declared variable).
     class Var : public Expr {
@@ -873,6 +924,29 @@ namespace mycc {
         }
     };
 
+    class CastExpr : public Expr {
+        SMLoc Loc;
+        Expr *expr; // the expression that will be casted
+        std::unique_ptr<Type> castType;
+    public:
+        CastExpr(Expr * expr, std::unique_ptr<Type> castType) :
+            Expr(Ek_Cast), expr(expr), castType(std::move(castType)) {}
+
+        ~CastExpr() override = default;
+
+        [[nodiscard]] const Expr *getCastedExpression() const {
+            return expr;
+        }
+
+        [[nodiscard]] const Type *getCastedType() const {
+            return castType.get();
+        }
+
+        static bool classof(const Expr *E) {
+            return E->getKind() == Ek_Cast;
+        }
+    };
+
     using ArgsList = std::vector<Var *>;
 
     /// @brief AST node for a variable declaration, with optional initializer
@@ -884,6 +958,7 @@ namespace mycc {
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
         std::optional<StorageClass> storageClass;
+        std::unique_ptr<Type> varType;
         // For static local variables, stores the unique global name (e.g., "func.var.1")
         std::optional<std::string> uniqueName;
 
@@ -896,6 +971,10 @@ namespace mycc {
 
         VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass)
             : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass) {
+        }
+
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass, std::unique_ptr<Type> varType)
+            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass), varType(std::move(varType)) {
         }
 
         ~VarDeclaration() = default;
@@ -920,12 +999,20 @@ namespace mycc {
             storageClass = sc;
         }
 
-        [[nodiscard]] const std::optional<std::string>& getUniqueName() const {
+        [[nodiscard]] const std::optional<std::string> &getUniqueName() const {
             return uniqueName;
         }
 
-        void setUniqueName(const std::string& name) {
+        void setUniqueName(const std::string &name) {
             uniqueName = name;
+        }
+
+        [[nodiscard]] const Type *getType() const {
+            return varType.get();
+        }
+
+        void setType(std::unique_ptr<Type> type) {
+            varType = std::move(type);
         }
     };
 
@@ -938,7 +1025,9 @@ namespace mycc {
         ArgsList args;
         bool IsDefinition = false; // True if function has a body (even if empty)
         BlockItems body;
+        std::unique_ptr<FunctionType> funcType;
         std::optional<StorageClass> storageClass;
+
 
     public:
         FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args)
@@ -947,6 +1036,10 @@ namespace mycc {
 
         FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
             : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
+        }
+
+        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType> funcType)
+            : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass), funcType(std::move(funcType)) {
         }
 
         ~FunctionDeclaration() = default;
@@ -1023,6 +1116,10 @@ namespace mycc {
         /// Returns true if the function has external linkage (is NOT static)
         [[nodiscard]] bool isGlobal() const {
             return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
+        }
+
+        [[nodiscard]] const FunctionType *getFunctionType() const {
+            return funcType.get();
         }
     };
 
