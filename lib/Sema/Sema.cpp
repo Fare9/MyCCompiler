@@ -475,7 +475,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         const SymbolEntry *entry = FuncScope->lookupEntry(Name);
         if (entry && entry->isLocalAttr() && !avoid_errors) {
             // Local variable (no linkage) conflicts with function declaration
-            Diags.report(Loc, diag::err_linkage_conflict, Name);
+            Diags.report(Loc, diag::err_linkage_conflict, Name.str());
             return nullptr;
         }
     }
@@ -484,7 +484,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
     // (function cannot redeclare a file-scope variable)
     VarDeclaration *existingVar = GlobalSymbolTable->lookupForVar(Name);
     if (existingVar && !avoid_errors) {
-        Diags.report(Loc, diag::err_variable_redeclared_as_function, Name);
+        Diags.report(Loc, diag::err_variable_redeclared_as_function, Name.str());
         return nullptr;
     }
 
@@ -494,7 +494,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
     if (existing) {
         // Check argument count matches
         if (existing->getArgs().size() != args.size() && !avoid_errors) {
-            Diags.report(Loc, diag::err_wrong_argument_count, Name, existing->getArgs().size(), args.size());
+            Diags.report(Loc, diag::err_wrong_argument_count, Name.str(), existing->getArgs().size(), args.size());
             return nullptr;
         }
 
@@ -504,7 +504,7 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         bool newIsStatic = (storageClass == StorageClass::SC_Static);
 
         if (oldIsGlobal && newIsStatic && !avoid_errors) {
-            Diags.report(Loc, diag::err_static_follows_non_static, Name);
+            Diags.report(Loc, diag::err_static_follows_non_static, Name.str());
             return nullptr;
         }
 
@@ -591,7 +591,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
     // Check for conflicts in current scope first
     if (CurrentScope->hasSymbolInCurrentScope(Name) &&
         CurrentScope->hasLinkageConflict(Name, storageClass) && !avoid_errors) {
-        Diags.report(Loc, diag::err_linkage_conflict, Name);
+        Diags.report(Loc, diag::err_linkage_conflict, Name.str());
         return true;
     }
 
@@ -606,18 +606,18 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
             const SymbolEntry *currentEntry = CurrentScope->lookupEntry(Name);
             if (currentEntry != nullptr) {
                 if (currentEntry->isFunction() && !avoid_errors) {
-                    Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                    Diags.report(Loc, diag::err_function_redeclared_as_variable, Name.str());
                     return true;
                 }
                 // If there's already a local variable in current scope, it's a conflict
                 if (currentEntry->isLocalAttr() && !avoid_errors) {
-                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name.str());
                     return true;
                 }
                 // If there's already a static local in current scope, it's a conflict
                 const StaticAttr *attrs = currentEntry->getStaticAttr();
                 if (attrs != nullptr && !attrs->global && !avoid_errors) {
-                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name.str());
                     return true;
                 }
                 // Previous extern in current scope - valid redeclaration, don't add again
@@ -631,7 +631,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
         const SymbolEntry *globalEntry = GlobalSymbolTable->lookupEntry(Name);
         if (globalEntry != nullptr) {
             if (globalEntry->isFunction() && !avoid_errors) {
-                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name.str());
                 return true;
             }
             // Found existing declaration with linkage - inherit its attributes
@@ -703,7 +703,7 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
     if (storageClass == StorageClass::SC_Extern) {
         // extern local variable - no initializer allowed
         if (initExpr != nullptr && !avoid_errors) {
-            Diags.report(SMLoc(), diag::err_extern_variable_has_initializer, Name);
+            Diags.report(SMLoc(), diag::err_extern_variable_has_initializer, Name.str());
             return true;
         }
         // Don't set expression for extern
@@ -787,13 +787,13 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
     // Check for conflict with block-scope extern that established external linkage
     if (!global && BlockScopeExternLinkage.contains(Name.str()) && !avoid_errors) {
         // File-scope static conflicts with prior block-scope extern (which has external linkage)
-        Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+        Diags.report(Loc, diag::err_conflicting_variable_linkage, Name.str());
         return nullptr;
     }
 
     // Check for conflict with previously declared function
     if (GlobalSymbolTable->lookupForFunction(Name) && !avoid_errors) {
-        Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+        Diags.report(Loc, diag::err_function_redeclared_as_variable, Name.str());
         return nullptr;
     }
 
@@ -803,7 +803,7 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
         // Check if it's a function being redeclared as a variable
         if (oldEntry->isFunction()) {
             if (!avoid_errors) {
-                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name.str());
                 return nullptr;
             }
         }
@@ -813,7 +813,7 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
         if (oldAttrs == nullptr) {
             // It's a LocalAttr which shouldn't happen at file scope, treat as error
             if (!avoid_errors) {
-                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name);
+                Diags.report(Loc, diag::err_function_redeclared_as_variable, Name.str());
                 return nullptr;
             }
         } else {
@@ -823,7 +823,7 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
             } else if (oldAttrs->global != global) {
                 // Conflicting linkage (static vs non-static)
                 if (!avoid_errors) {
-                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name);
+                    Diags.report(Loc, diag::err_conflicting_variable_linkage, Name.str());
                     return nullptr;
                 }
             }
@@ -834,7 +834,7 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
                 if (initialValue == InitialValue::Initial) {
                     // Both have constant initializers - conflicting definitions
                     if (!avoid_errors) {
-                        Diags.report(Loc, diag::err_conflicting_file_scope_definitions, Name);
+                        Diags.report(Loc, diag::err_conflicting_file_scope_definitions, Name.str());
                         return nullptr;
                     }
                 } else {
@@ -1059,7 +1059,7 @@ FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, Exp
     FunctionDeclaration *func = CurrentScope->lookupForFunction(name);
     if (!func) {
         if (CurrentScope->lookupForVar(name) && !avoid_errors) {
-            Diags.report(Loc, diag::err_definition_used_as_function, name);
+            Diags.report(Loc, diag::err_definition_used_as_function, name.str());
             return nullptr;
         }
         func = GlobalSymbolTable->lookupForFunction(name);
@@ -1067,7 +1067,7 @@ FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, Exp
 
     if (func != nullptr) {
         if (func->getArgs().size() != args.size() && !avoid_errors) {
-            Diags.report(Loc, diag::err_wrong_argument_call, name, args.size(), func->getArgs().size());
+            Diags.report(Loc, diag::err_wrong_argument_call, name.str(), args.size(), func->getArgs().size());
             return nullptr;
         }
         // Function found, use its name (original name)
