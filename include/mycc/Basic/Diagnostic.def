@@ -5,6 +5,7 @@
 DIAG(err_expected, Error, "expected {} but found {}")
 DIAG(err_unexpected_token, Error, "unexpected character '{}' in source")
 DIAG(err_invalid_suffix_integer, Error, "invalid suffix '{0}' on integer literal")
+DIAG(err_long_literal_too_large, Error, "integer literal is too large to be represented in type 'long'")
 
 DIAG(err_duplicate_symbol_in_scope, Error, "Error, symbol with name '{}' has already been defined in the scope")
 

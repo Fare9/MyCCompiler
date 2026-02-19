@@ -118,19 +118,17 @@ namespace mycc {
 
         /// @brief Parse the rest of a function after 'int name' has been consumed
         bool parseFunctionRest(FunctionDeclaration *&F, SMLoc Loc, StringRef Name,
-                               std::optional<StorageClass> storageClass);
+                               std::optional<StorageClass> storageClass, std::unique_ptr<Type> retType);
 
         /// @brief Parse the rest of a global variable after 'int name' has been consumed
         bool parseGlobalVarRest(VarDeclaration *&V, SMLoc Loc, StringRef Name,
-                                std::optional<StorageClass> storageClass);
+                                std::optional<StorageClass> storageClass, std::unique_ptr<Type> type);
 
         /// @brief Parse for a possible declaration of a variable, or a function
         /// and if not parse a statement.
         /// @param Items all the items from the block.
         /// @return `false` if parse was well, `true` otherwise.
         bool parseBlock(BlockItems &Items);
-
-
 
         /// @brief Parse a declaration of a variable, it handles the storage class analysis
         /// the type, and finally name and optionally initialization of a variable.
@@ -202,9 +200,10 @@ namespace mycc {
         /// @param Items block items list to append the declaration to.
         /// @param Loc source location of the declaration.
         /// @param Name name of the function.
+        /// @param retType return type of the function
         /// @param storageClass optional storage class (extern/static).
         /// @return `false` if parse was well, `true` otherwise.
-        bool parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
+        bool parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> retType,
                                           std::optional<StorageClass> storageClass = std::nullopt);
 
         /// @brief Parse the rest of a variable declaration inline (inside a block)
@@ -214,7 +213,7 @@ namespace mycc {
         /// @param Name name of the variable.
         /// @param storageClass optional storage class (extern/static).
         /// @return `false` if parse was well, `true` otherwise.
-        bool parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
+        bool parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> type,
                                      std::optional<StorageClass> storageClass = std::nullopt);
 
         /// @brief Parse an expression using precedence climbing.

@@ -455,7 +455,7 @@ Program *Sema::actOnProgramDeclaration(DeclarationList &Decls) const {
 }
 
 FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
-                                                    std::optional<StorageClass> storageClass) {
+                                                    std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType>& funcType) {
     auto *FuncScope = CurrentScope->getParentScope();
     // Functions have linkage (external or internal/static)
     constexpr ScopeType scope = ScopeType::Global;
@@ -525,6 +525,8 @@ FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, A
         func->setStorageClass(storageClass.value());
     }
 
+    func->setFunctionType(funcType);
+
     // Insert into GlobalSymbolTable (for IR generation and cross-function visibility)
     GlobalSymbolTable->addDeclaredIdentifier(Name);
     GlobalSymbolTable->insert(func, computeLinkage(storageClass, scope), scope);
@@ -583,7 +585,7 @@ Var *Sema::actOnParameterDeclaration(SMLoc Loc, StringRef Name) const {
  * @return true if an error occurred, false on success.
  */
 bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
-                               std::optional<StorageClass> storageClass) {
+                               std::optional<StorageClass> storageClass, std::unique_ptr<Type>& type) {
     if (!CurrentScope) {
         return true;
     }
@@ -597,6 +599,7 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
 
     auto *var = Context.createExpression<Var>(Loc, Name);
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, nullptr, storageClass);
+    decl->setType(type);
 
     if (storageClass == StorageClass::SC_Extern) {
         // extern local variable
@@ -749,7 +752,7 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
 }
 
 VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
-                                                 std::optional<StorageClass> storageClass) {
+                                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type>& type) {
     // Step 1-3: Determine initial_value based on initializer
     InitialValue initialValue;
     std::optional<int64_t> constantValue = std::nullopt;
@@ -866,6 +869,8 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
     auto *var = Context.createExpression<Var>(Loc, Name);
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, initExpr, storageClass);
 
+    decl->setType(type);
+
     // Create the StaticAttr and insert into scope
     // Note: We manually construct the symbol entry since we need specific initial values
     StaticAttr attrs{initialValue, constantValue, global};
@@ -955,12 +960,27 @@ void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statem
     Items.emplace_back(Context.createStatement<SwitchStatement>(Cond, Body));
 }
 
-IntegerLiteral *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const {
-    uint8_t Radix = 10;
+Expr *Sema::actOnConstLiteral(SMLoc Loc, StringRef Literal) const {
+    const bool isLong = Literal.ends_with_insensitive("l");
+    const StringRef digits = isLong ? Literal.drop_back() : Literal;
 
-    llvm::APInt Value(64, Literal, Radix);
-    return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value, false));
+    // Parse into 65 bits to detect overflow beyond long
+    llvm::APInt Value(65, digits, 10);
+    if (Value.ugt(llvm::APInt(65, INT64_MAX))) {
+        Diags.report(Loc, diag::err_long_literal_too_large);
+        return nullptr;
+    }
+
+    // Explicit long suffix: always LongLiteral
+    if (isLong)
+        return Context.createExpression<LongLiteral>(Loc, llvm::APSInt(Value.trunc(64), false));
+
+    // Unsuffixed: fits in int → IntegerLiteral, otherwise implicit promotion to long
+    if (Value.ule(llvm::APInt(65, INT32_MAX)))
+        return Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value.trunc(32), false));
+    return Context.createExpression<LongLiteral>(Loc, llvm::APSInt(Value.trunc(64), false));
 }
+
 
 UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) const {
     return Context.createExpression<UnaryOperator>(Loc, Kind, expr);
@@ -1079,4 +1099,8 @@ FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, Exp
         return nullptr;
     }
     return Context.createExpression<FunctionCallExpr>(name, args);
+}
+
+CastExpr *Sema::actOnCastOperator(SMLoc Loc, Expr *expr, std::unique_ptr<Type> type) {
+    return Context.createExpression<CastExpr>(expr, std::move(type));
 }

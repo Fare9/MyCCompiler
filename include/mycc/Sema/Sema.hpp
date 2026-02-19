@@ -231,9 +231,11 @@ namespace mycc {
          * @param Loc Source location of the function declaration.
          * @param Name Function name.
          * @param args Function parameters.
+         * @param funcType The type of the function.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass);
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
+            std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType>& funcType);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
@@ -256,7 +258,7 @@ namespace mycc {
          * @return true on error, false on success.
          */
         bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
-                                 std::optional<StorageClass> storageClass);
+                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type>& type);
 
         /**
          * @brief Validate and set the initializer for a variable declaration.
@@ -287,10 +289,11 @@ namespace mycc {
          * @param Name Variable name.
          * @param initExpr Optional initializer expression (must be constant if present).
          * @param storageClass Storage class specifier (Static, Extern, or none).
+         * @param type type of the variable.
          * @return VarDeclaration pointer on success, nullptr on error.
          */
         [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
-                                                                 std::optional<StorageClass> storageClass);
+                                                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type>& type);
 
         /**
          * @brief Create a return statement.
@@ -418,12 +421,13 @@ namespace mycc {
 
 
         /**
-         * @brief Create an integer literal expression.
+         * @brief Create a const literal expression.
+         * Unsuffixed literals that exceed INT32_MAX are implicitly promoted to long.
          * @param Loc Source location of the literal.
          * @param Literal String representation of the integer.
-         * @return Pointer to the created IntegerLiteral node.
+         * @return IntegerLiteral, or LongLiteral on implicit promotion, or nullptr on overflow.
          */
-        [[nodiscard]] IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
+        [[nodiscard]] Expr *actOnConstLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -499,6 +503,8 @@ namespace mycc {
          * @return Pointer to the created FunctionCallExpr node.
          */
         FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const;
+
+        CastExpr *actOnCastOperator(SMLoc Loc, Expr *expr, std::unique_ptr<Type> type);
     };
 
     /**

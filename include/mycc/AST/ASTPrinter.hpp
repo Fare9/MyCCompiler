@@ -37,6 +37,7 @@ private:
     static std::string printCaseStatement(const CaseStatement* stmt, int indent);
     static std::string printDefaultStatement(const DefaultStatement* stmt, int indent);
     static std::string printIntegerLiteral(const IntegerLiteral* expr, int indent);
+    static std::string printLongLiteral(const LongLiteral* expr, int indent);
     static std::string printVar(const Var* expr, int indent);
     static std::string printUnaryOperator(const UnaryOperator* expr, int indent);
     static std::string printBinaryOperator(const BinaryOperator* expr, int indent);
@@ -45,6 +46,7 @@ private:
     static std::string printPostfixOperator(const PostfixOperator* expr, int indent);
     static std::string printConditionalExpr(const ConditionalExpr* expr, int indent);
     static std::string printFunctionCallExpr(const FunctionCallExpr* expr, int indent);
+    static std::string printCastExpr(const CastExpr* expr, int indent);
     static std::string printDeclaration(const VarDeclaration* decl, int indent);
     
     static std::string getIndent(int level);

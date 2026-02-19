@@ -4,6 +4,28 @@
 
 using namespace mycc;
 
+namespace {
+    std::unique_ptr<Type> parseType(const Token &Tok) {
+        if (Tok.is(tok::kw_int))
+            return std::make_unique<BuiltinType>(BuiltinType::Int);
+        if (Tok.is(tok::kw_long))
+            return std::make_unique<BuiltinType>(BuiltinType::Long);
+        return nullptr;
+    }
+    /// @brief Try to parse a parameter type token (int or long) and push the
+    /// corresponding BuiltinType into argTypes.
+    /// @return true if a type token was recognized and pushed, false otherwise.
+    /// The caller is responsible for calling advance() on success and
+    /// invoking error handling on failure.
+    bool parseParamType(const Token &Tok, std::vector<std::unique_ptr<Type>> &argTypes) {
+        std::unique_ptr<Type> type = parseType(Tok);
+        if (type == nullptr)
+            return false;
+        argTypes.push_back(std::move(type));
+        return true;
+    }
+}
+
 Parser::Parser(Lexer &Lex, Sema &Actions, ASTContext &Context) : Lex(Lex), Actions(Actions), Context(Context) {
 }
 
@@ -41,7 +63,8 @@ std::vector specifiers = {
 };
 
 std::vector types = {
-    tok::kw_int
+    tok::kw_int,
+    tok::kw_long
 };
 
 bool Parser::parseDeclaration(DeclarationList &Decls) {
@@ -57,7 +80,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     if (Tok.is(tok::l_paren)) {
         // Function declaration
         FunctionDeclaration *Func = nullptr;
-        if (!parseFunctionRest(Func, loc, name, storageClass))
+        if (!parseFunctionRest(Func, loc, name, storageClass, std::unique_ptr<Type>(type)))
             return true;
 
         // Check for duplicate declarations
@@ -78,7 +101,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     } else {
         // Variable declaration
         VarDeclaration *Var = nullptr;
-        if (!parseGlobalVarRest(Var, loc, name, storageClass))
+        if (!parseGlobalVarRest(Var, loc, name, storageClass, std::unique_ptr<Type>(type)))
             return true;
 
         Decls.emplace_back(Var);
@@ -119,14 +142,29 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
                 storageClass = StorageClass::SC_Static;
             }
         } else if (Tok.is(tok::kw_int)) {
-            // Check there's no double declaration
-            if (type != nullptr) {
-                getDiagnostics().report(Tok.getLocation(),
-                                        diag::err_declaration_has_type);
+            if (type == nullptr) {
+                type = new BuiltinType(BuiltinType::Int);
+            } else if (dynamic_cast<BuiltinType *>(type)->getBuiltinKind() == BuiltinType::Long) {
+                // `long int` -> keep Long
+            } else {
+                // `int int` -> error
+                getDiagnostics().report(Tok.getLocation(), diag::err_declaration_has_type);
                 delete type;
                 return true;
             }
-            type = new BuiltinType(BuiltinType::Int);
+        } else if (Tok.is(tok::kw_long)) {
+            if (type == nullptr) {
+                type = new BuiltinType(BuiltinType::Long);
+            } else if (dynamic_cast<BuiltinType *>(type)->getBuiltinKind() == BuiltinType::Int) {
+                // `int long` -> upgrade to Long
+                delete type;
+                type = new BuiltinType(BuiltinType::Long);
+            } else {
+                // `long long` -> unsupported
+                getDiagnostics().report(Tok.getLocation(), diag::err_declaration_has_type);
+                delete type;
+                return true;
+            }
         }
         advance();
     }
@@ -149,9 +187,8 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
     return false;
 }
 
-
 bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef funcName,
-                               std::optional<StorageClass> storageClass) {
+                               std::optional<StorageClass> storageClass, std::unique_ptr<Type> retType) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
@@ -160,6 +197,7 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
 
     ArgsList args;
     BlockItems body;
+    std::vector<std::unique_ptr<Type> > argTypes;
     bool parsedBody = false;
 
     // consume '('
@@ -178,8 +216,10 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (consume(tok::kw_int))
+        if (!parseParamType(Tok, argTypes))
             return _errorhandler();
+        advance();
+
         if (expect(tok::identifier))
             return _errorhandler();
 
@@ -190,8 +230,11 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
 
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
-            if (consume(tok::kw_int))
+
+            if (!parseParamType(Tok, argTypes))
                 return _errorhandler();
+            advance();
+
             if (expect(tok::identifier))
                 return _errorhandler();
 
@@ -207,7 +250,8 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         return _errorhandler();
 
     // Generate a new function or obtain a previous one
-    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass);
+    auto funcType = std::make_unique<FunctionType>(std::move(retType), std::move(argTypes));
+    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass, funcType);
     if (!F)
         return _errorhandler();
 
@@ -255,7 +299,7 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
 }
 
 bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
-                                std::optional<StorageClass> storageClass) {
+                                std::optional<StorageClass> storageClass, std::unique_ptr<Type> type) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
@@ -275,7 +319,7 @@ bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
         return _errorhandler();
 
     // Perform semantic analysis for the global variable declaration
-    V = Actions.actOnGlobalVarDeclaration(loc, name, initExpr, storageClass);
+    V = Actions.actOnGlobalVarDeclaration(loc, name, initExpr, storageClass, type);
     if (!V)
         return _errorhandler();
 
@@ -298,11 +342,11 @@ bool Parser::parseBlock(BlockItems &Items) {
             // Check if it's a function (has '(') or variable (has '=' or ';')
             if (Tok.is(tok::l_paren)) {
                 // Function declaration in block
-                if (parseFunctionDeclarationStmt(Items, loc, name, storageClass))
+                if (parseFunctionDeclarationStmt(Items, loc, name, std::unique_ptr<Type>(type), storageClass))
                     return true;
             } else {
                 // Variable declaration
-                if (parseVariableDeclInline(Items, loc, name, storageClass))
+                if (parseVariableDeclInline(Items, loc, name, std::unique_ptr<Type>(type), storageClass))
                     return true;
             }
         } else {
@@ -323,7 +367,8 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
         return true;
 
     // Add variable to scope first (so it can be referenced in initializer)
-    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass))
+    auto typePtr = std::unique_ptr<Type>(type);
+    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass, typePtr))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
@@ -731,10 +776,12 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
     return false;
 }
 
-bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
+bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> retType,
                                           std::optional<StorageClass> storageClass) {
     ArgsList args;
     BlockItems body;
+    std::vector<std::unique_ptr<Type> > argTypes;
+
     bool parsedBody = false;
 
     if (consume(tok::l_paren))
@@ -746,8 +793,10 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (consume(tok::kw_int))
+        if (!parseParamType(Tok, argTypes))
             return true;
+        advance();
+
         if (expect(tok::identifier))
             return true;
 
@@ -758,8 +807,9 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
 
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
-            if (consume(tok::kw_int))
+            if (!parseParamType(Tok, argTypes))
                 return true;
+            advance();
             if (expect(tok::identifier))
                 return true;
 
@@ -774,7 +824,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         return true;
 
     // Create a Function object with no body (declaration only)
-    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass);
+    auto funcType = std::make_unique<FunctionType>(std::move(retType), std::move(argTypes));
+    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass, funcType);
     if (!F)
         return true;
 
@@ -819,12 +870,13 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
 }
 
 bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                     std::unique_ptr<Type> type,
                                      std::optional<StorageClass> storageClass) {
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
 
     // Add variable to scope first (so it can be referenced in initializer)
-    if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass))
+    if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass, type))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
@@ -1066,7 +1118,9 @@ bool Parser::parseFactor(Expr *&E) {
     };
     // the factor is an integer
     if (Tok.is(tok::integer_literal)) {
-        E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
+        E = Actions.actOnConstLiteral(Tok.getLocation(), Tok.getLiteralData());
+        if (!E)
+            return true;
         advance();
     }
     // the factor is an identifier (it can contain postfix operator)
@@ -1120,11 +1174,7 @@ bool Parser::parseFactor(Expr *&E) {
     }
 
     // Look for unary operators or for prefix operators
-    else if
-    (Tok
-        .
-        isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)
-    ) {
+    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
@@ -1144,44 +1194,53 @@ bool Parser::parseFactor(Expr *&E) {
         else if (OpKind == tok::decrement)
             E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreDecrement, internalExpr);
     }
-    // Parentheses expression (<expr>)
-    else if
-    (Tok
-        .
-        is(tok::l_paren)
-    ) {
+    // Parentheses expression:
+    // Cast: (type) expr;
+    // Parentheses expression: (<expr>)
+    else if(Tok.is(tok::l_paren)) {
         advance();
-        if (parseExpr(E, 0))
-            return _errorhandler();
-        if (consume(tok::r_paren))
-            return _errorhandler();
+        auto type = parseType(Tok);
 
-        // Check for postfix operators after parenthesized expressions
-        if (Tok.isOneOf(tok::increment, tok::decrement)) {
-            tok::TokenKind OpKind = Tok.getKind();
-            SMLoc OpLoc = Tok.getLocation();
-            advance();
-            if (OpKind == tok::increment)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
-            else if (OpKind == tok::decrement)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+        if (type == nullptr) {
+            if (parseExpr(E, 0))
+                return _errorhandler();
+            if (consume(tok::r_paren))
+                return _errorhandler();
+
+            // Check for postfix operators after parenthesized expressions
+            if (Tok.isOneOf(tok::increment, tok::decrement)) {
+                tok::TokenKind OpKind = Tok.getKind();
+                SMLoc OpLoc = Tok.getLocation();
+                advance();
+                if (OpKind == tok::increment)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
+                else if (OpKind == tok::decrement)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+            }
         }
-    } else
-        return
-                _errorhandler();
-
-    return
-            false;
+        else {
+            SMLoc OpLoc = Tok.getLocation();
+            advance(); // consume the type keyword (int/long)
+            if (consume(tok::r_paren))
+                return _errorhandler();
+            if (parseExpr(E, 0))
+                return _errorhandler();
+            E = Actions.actOnCastOperator(OpLoc, E, std::move(type));
+        }
+    } else {
+        return _errorhandler();
+    }
+    return false;
 }
 
 int Parser::get_operator_kind_by_expr(Expr *expr) {
-    if (BinaryOperator *binOp = reinterpret_cast<BinaryOperator *>(expr)) {
+    if (auto *binOp = reinterpret_cast<BinaryOperator *>(expr)) {
         return binary_operators_precedence[binOp->getOperatorKind()];
     }
-    if (AssignmentOperator *assignOp = reinterpret_cast<AssignmentOperator *>(expr)) {
+    if ([[maybe_unused]] auto *assignOp = reinterpret_cast<AssignmentOperator *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Assign];
     }
-    if (ConditionalExpr *condExpr = reinterpret_cast<ConditionalExpr *>(expr)) {
+    if ([[maybe_unused]] auto *condExpr = reinterpret_cast<ConditionalExpr *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Interrogation];
     }
     return 0;

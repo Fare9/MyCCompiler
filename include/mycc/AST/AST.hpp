@@ -56,6 +56,8 @@ namespace mycc {
         virtual ~Type() = default;
 
         [[nodiscard]] TypeKind getKind() const { return Kind; }
+
+        virtual std::string to_string() = 0;
     };
 
     /// @brief Represents a built-in primitive type (e.g. `int`, `void`).
@@ -78,6 +80,19 @@ namespace mycc {
 
         [[nodiscard]] BuiltinKind getBuiltinKind() const { return BuiltinK; }
 
+        std::string to_string() override {
+            switch (BuiltinK) {
+                case Int:
+                    return "int";
+                case Long:
+                    return "long";
+                case Void:
+                    return "void";
+                default:
+                    return "";
+            }
+        }
+
         static bool classof(const Type *T) {
             return T->getKind() == TK_Builtin;
         }
@@ -85,11 +100,12 @@ namespace mycc {
 
     /// @brief Represents a Function type, it contains return types, and argument types.
     class FunctionType : public Type {
+        std::string funcTypeStr;
         std::unique_ptr<Type> retType;
-        std::vector<Type> argType;
+        std::vector<std::unique_ptr<Type>> argType;
 
     public:
-        FunctionType(std::unique_ptr<Type> retType, std::vector<Type> argType) : Type(TK_Function),
+        FunctionType(std::unique_ptr<Type> retType, std::vector<std::unique_ptr<Type>> argType) : Type(TK_Function),
             retType(std::move(retType)), argType(std::move(argType)) {
         }
 
@@ -101,8 +117,22 @@ namespace mycc {
         }
 
         /// @return reference to the vector with the argument types
-        [[nodiscard]] const std::vector<Type> &getArgTypes() const {
+        [[nodiscard]] const std::vector<std::unique_ptr<Type>> &getArgTypes() const {
             return argType;
+        }
+
+        std::string to_string() override {
+            if (!funcTypeStr.empty())
+                return funcTypeStr;
+            funcTypeStr += retType->to_string() + " ";
+            funcTypeStr += "(";
+            for (const auto &arg : argType) {
+                funcTypeStr += arg->to_string() + ",";
+            }
+            if (!argType.empty())
+                funcTypeStr.pop_back();
+            funcTypeStr += ")";
+            return funcTypeStr;
         }
 
         static bool classof(const Type *T) {
@@ -926,7 +956,7 @@ namespace mycc {
 
     class CastExpr : public Expr {
         SMLoc Loc;
-        Expr *expr; // the expression that will be casted
+        Expr *expr; // the expression that will be casted to
         std::unique_ptr<Type> castType;
     public:
         CastExpr(Expr * expr, std::unique_ptr<Type> castType) :
@@ -1011,7 +1041,7 @@ namespace mycc {
             return varType.get();
         }
 
-        void setType(std::unique_ptr<Type> type) {
+        void setType(std::unique_ptr<Type>& type) {
             varType = std::move(type);
         }
     };
@@ -1116,6 +1146,10 @@ namespace mycc {
         /// Returns true if the function has external linkage (is NOT static)
         [[nodiscard]] bool isGlobal() const {
             return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
+        }
+
+        void setFunctionType(std::unique_ptr<FunctionType>& type) {
+            funcType = std::move(type);
         }
 
         [[nodiscard]] const FunctionType *getFunctionType() const {
