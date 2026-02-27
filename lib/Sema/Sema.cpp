@@ -20,8 +20,7 @@ void Sema::assignLoopLabels(FunctionDeclaration& F)
  */
 void Sema::enterFunction(StringRef name) {
     CurrentFunctionName = name.str();
-    FunctionLabels.clear();
-    GotoLabels.clear();
+    gotoLabelValidator.clearLabels();
 }
 
 /**
@@ -32,17 +31,8 @@ void Sema::enterFunction(StringRef name) {
  */
 void Sema::exitFunction() const {
     // Check that all goto labels are defined in the function
-    if (!avoid_errors) {
-        checkGotoLabelsCorrectlyPointToFunction();
-    }
-}
-
-void Sema::checkGotoLabelsCorrectlyPointToFunction() const {
-    for (const auto &label: GotoLabels) {
-        if (!FunctionLabels.contains(label)) {
-            Diags.report(SMLoc(), diag::err_undefined_label, label.str());
-            exit(1);
-        }
+    if (!avoid_errors && gotoLabelValidator.validateGotoLabels(Diags)) {
+        exit(1);
     }
 }
 
@@ -85,7 +75,8 @@ Program *Sema::actOnProgramDeclaration(DeclarationList &Decls) const {
 }
 
 FunctionDeclaration *Sema::actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
-                                                    std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType>& funcType) {
+                                                    std::optional<StorageClass> storageClass,
+                                                    std::unique_ptr<FunctionType>& funcType) {
     auto *FuncScope = CurrentScope->getParentScope();
     // Functions have linkage (external or internal/static)
     constexpr ScopeType scope = ScopeType::Global;
@@ -543,17 +534,17 @@ void Sema::actOnLabelStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
         // The Labels are unique for each function, we must
         // ensure this property, throwing an error in case
         // an existing label has been declared again.
-        if (FunctionLabels.contains(Label)) {
+        if (gotoLabelValidator.FunctionLabelContains(Label)) {
             Diags.report(Loc, diag::err_existing_label, Label.str());
             exit(1);
         }
     }
-    FunctionLabels.insert(Label);
+    gotoLabelValidator.addFunctionLabel(Label);
     Items.emplace_back(Context.createStatement<LabelStatement>(Label));
 }
 
 void Sema::actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
-    GotoLabels.insert(Label);
+    gotoLabelValidator.addFunctionLabel(Label);
     Items.emplace_back(Context.createStatement<GotoStatement>(Label));
 }
 

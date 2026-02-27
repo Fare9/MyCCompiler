@@ -5,11 +5,11 @@
 #include "mycc/Sema/Scope.hpp"
 #include "mycc/Basic/Diagnostic.hpp"
 #include "mycc/Sema/Analyses/LabelGenerator.hpp"
+#include "mycc/Sema/Analyses/GotoLabelValidator.hpp"
 #include <string>
 #include <set>
 
-namespace mycc
-{
+namespace mycc {
     /**
      * @class Sema
      * @brief Semantic analysis class for the C compiler.
@@ -21,14 +21,13 @@ namespace mycc
      * - Loop and switch statement validation
      * - Type checking and constant expression evaluation
      */
-    class Sema
-    {
+    class Sema {
         friend class EnterDeclScope;
 
-        DiagnosticsEngine& Diags;
-        ASTContext& Context;
-        Scope* GlobalSymbolTable; // Collects all top-level definitions for IR generation
-        Scope* CurrentScope;
+        DiagnosticsEngine &Diags;
+        ASTContext &Context;
+        Scope *GlobalSymbolTable; // Collects all top-level definitions for IR generation
+        Scope *CurrentScope;
         bool avoid_errors = false;
 
         // Current function name for generating unique static local names
@@ -39,20 +38,13 @@ namespace mycc
         // later file-scope static declarations.
         std::set<std::string> BlockScopeExternLinkage;
 
-
-        // Set that contains for a method the labels
-        std::set<StringRef> FunctionLabels;
-        // Set that contains all the jumped labels by Goto
-        std::set<StringRef> GotoLabels;
-
+        // Used to generate labels for different parts of the code
+        // it is used in the Sema.cpp, and the analyses inside
+        // the Semantic part.
         LabelGenerator Labels;
 
-        // Final passes from Semantic Analysis
-
-        /**
-         * @brief Verify all goto labels reference defined labels in the function.
-         */
-        void checkGotoLabelsCorrectlyPointToFunction() const;
+        // Validator to check the GotoLabels
+        GotoLabelValidator gotoLabelValidator;
 
         /**
          * Compute the Linkage depending on the Storage class and the scope.
@@ -68,35 +60,30 @@ namespace mycc
          * @param Diags Diagnostics engine for error reporting.
          * @param Context AST context for creating AST nodes.
          */
-        explicit Sema(DiagnosticsEngine& Diags, ASTContext& Context) :
-            Diags(Diags), Context(Context), GlobalSymbolTable(nullptr),
-            CurrentScope(nullptr)
-        {
+        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context),
+                                                                       GlobalSymbolTable(nullptr),
+                                                                       CurrentScope(nullptr) {
             initialize();
         }
 
-        ~Sema()
-        {
+        ~Sema() {
             delete GlobalSymbolTable;
         }
 
-        void assignLoopLabels(FunctionDeclaration& F);
+        void assignLoopLabels(FunctionDeclaration &F);
 
         /**
          * @brief Disable error reporting (useful for testing).
          */
-        void avoidErrors()
-        {
+        void avoidErrors() {
             avoid_errors = true;
         }
 
-        [[nodiscard]] bool is_avoid_errors_active() const
-        {
+        [[nodiscard]] bool is_avoid_errors_active() const {
             return avoid_errors;
         }
 
-        [[nodiscard]] const Scope& getGlobalSymbolTable() const
-        {
+        [[nodiscard]] const Scope &getGlobalSymbolTable() const {
             return *GlobalSymbolTable;
         }
 
@@ -131,7 +118,7 @@ namespace mycc
          * @param Decls List of declarations in the program.
          * @return Pointer to the created Program node.
          */
-        Program* actOnProgramDeclaration(DeclarationList& Decls) const;
+        Program *actOnProgramDeclaration(DeclarationList &Decls) const;
 
         /**
          * @brief Create a Function node.
@@ -141,9 +128,9 @@ namespace mycc
          * @param funcType The type of the function.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration* actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList& args,
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
                                                       std::optional<StorageClass> storageClass,
-                                                      std::unique_ptr<FunctionType>& funcType);
+                                                      std::unique_ptr<FunctionType> &funcType);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
@@ -151,7 +138,7 @@ namespace mycc
          * @param Name Parameter name.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        [[nodiscard]] Var* actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Process a local variable declaration and add it to the current scope.
@@ -165,8 +152,8 @@ namespace mycc
          * @param storageClass type of storage (Static or Extern)
          * @return true on error, false on success.
          */
-        bool actOnVarDeclaration(BlockItems& Items, SMLoc Loc, StringRef Name,
-                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type>& type);
+        bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type> &type);
 
         /**
          * @brief Validate and set the initializer for a variable declaration.
@@ -180,7 +167,7 @@ namespace mycc
          * @param initExpr Optional initializer expression.
          * @return true on error, false on success.
          */
-        bool actOnVarDeclarationInit(VarDeclaration* decl, Expr* initExpr);
+        bool actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr);
 
         /**
          * @brief Process a file-scope (global) variable declaration.
@@ -200,9 +187,9 @@ namespace mycc
          * @param type type of the variable.
          * @return VarDeclaration pointer on success, nullptr on error.
          */
-        [[nodiscard]] VarDeclaration* actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr* initExpr,
+        [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
                                                                 std::optional<StorageClass> storageClass,
-                                                                std::unique_ptr<Type>& type);
+                                                                std::unique_ptr<Type> &type);
 
         /**
          * @brief Create a return statement.
@@ -210,14 +197,14 @@ namespace mycc
          * @param Loc Source location of the return statement.
          * @param RetVal Return value expression (may be null for void return).
          */
-        void actOnReturnStatement(BlockItems& Items, SMLoc Loc, Expr* RetVal) const;
+        void actOnReturnStatement(BlockItems &Items, SMLoc Loc, Expr *RetVal) const;
 
         /**
          * @brief Create a null (empty) statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the null statement.
          */
-        void actOnNullStatement(BlockItems& Items, SMLoc Loc) const;
+        void actOnNullStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create an expression statement.
@@ -225,7 +212,7 @@ namespace mycc
          * @param Loc Source location of the expression statement.
          * @param Expr Expression to evaluate.
          */
-        void actOnExprStatement(BlockItems& Items, SMLoc Loc, Expr* Expr) const;
+        void actOnExprStatement(BlockItems &Items, SMLoc Loc, Expr *Expr) const;
 
         /**
          * @brief Create an if statement with optional else clause.
@@ -235,7 +222,7 @@ namespace mycc
          * @param then_st Then branch statement.
          * @param else_st Else branch statement (may be null).
          */
-        void actOnIfStatement(BlockItems& Items, SMLoc Loc, Expr* Cond, Statement* then_st, Statement* else_st) const;
+        void actOnIfStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *then_st, Statement *else_st) const;
 
         /**
          * @brief Create a compound statement (block).
@@ -243,7 +230,7 @@ namespace mycc
          * @param Loc Source location of the compound statement.
          * @param compoundStatement Block items contained in the compound statement.
          */
-        void actOnCompoundStatement(BlockItems& Items, SMLoc Loc, BlockItems& compoundStatement) const;
+        void actOnCompoundStatement(BlockItems &Items, SMLoc Loc, BlockItems &compoundStatement) const;
 
         /**
          * @brief Create a label statement and register it in the function.
@@ -251,7 +238,7 @@ namespace mycc
          * @param Loc Source location of the label.
          * @param Label Label identifier.
          */
-        void actOnLabelStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
+        void actOnLabelStatement(BlockItems &Items, SMLoc Loc, StringRef Label);
 
         /**
          * @brief Create a goto statement and register the target label.
@@ -259,7 +246,7 @@ namespace mycc
          * @param Loc Source location of the goto statement.
          * @param Label Target label identifier.
          */
-        void actOnGotoStatement(BlockItems& Items, SMLoc Loc, StringRef Label);
+        void actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label);
 
         /**
          * @brief Create a while loop statement.
@@ -268,7 +255,7 @@ namespace mycc
          * @param Cond Loop condition expression.
          * @param Body Loop body statement.
          */
-        void actOnWhileStatement(BlockItems& Items, SMLoc Loc, Expr* Cond, Statement* Body) const;
+        void actOnWhileStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const;
 
         /**
          * @brief Create a do-while loop statement.
@@ -277,7 +264,7 @@ namespace mycc
          * @param Body Loop body statement.
          * @param Cond Loop condition expression.
          */
-        void actOnDoWhileStatement(BlockItems& Items, SMLoc Loc, Statement* Body, Expr* Cond) const;
+        void actOnDoWhileStatement(BlockItems &Items, SMLoc Loc, Statement *Body, Expr *Cond) const;
 
         /**
          * @brief Create a for loop statement.
@@ -288,29 +275,29 @@ namespace mycc
          * @param Post Post-iteration expression.
          * @param Body Loop body statement.
          */
-        void actOnForStatement(BlockItems& Items, SMLoc Loc, ForInit& Init, Expr* Cond, Expr* Post,
-                               Statement* Body) const;
+        void actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post,
+                               Statement *Body) const;
 
         /**
          * @brief Create a break statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the break statement.
          */
-        void actOnBreakStatement(BlockItems& Items, SMLoc Loc) const;
+        void actOnBreakStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a continue statement.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the continue statement.
          */
-        void actOnContinueStatement(BlockItems& Items, SMLoc Loc) const;
+        void actOnContinueStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a default case statement for switch.
          * @param Items Block items list to append the statement to.
          * @param Loc Source location of the default statement.
          */
-        void actOnDefaultStatement(BlockItems& Items, SMLoc Loc) const;
+        void actOnDefaultStatement(BlockItems &Items, SMLoc Loc) const;
 
         /**
          * @brief Create a case statement for switch.
@@ -318,7 +305,7 @@ namespace mycc
          * @param Loc Source location of the case statement.
          * @param Cond Case value expression (must be constant).
          */
-        void actOnCaseStatement(BlockItems& Items, SMLoc Loc, Expr* Cond) const;
+        void actOnCaseStatement(BlockItems &Items, SMLoc Loc, Expr *Cond) const;
 
         /**
          * @brief Create a switch statement.
@@ -327,7 +314,7 @@ namespace mycc
          * @param Cond Switch condition expression.
          * @param Body Switch body statement (typically a compound statement with cases).
          */
-        void actOnSwitchStatement(BlockItems& Items, SMLoc Loc, Expr* Cond, Statement* Body) const;
+        void actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statement *Body) const;
 
 
         /**
@@ -337,7 +324,7 @@ namespace mycc
          * @param Literal String representation of the integer.
          * @return IntegerLiteral, or LongLiteral on implicit promotion, or nullptr on overflow.
          */
-        [[nodiscard]] Expr* actOnConstLiteral(SMLoc Loc, StringRef Literal) const;
+        [[nodiscard]] Expr *actOnConstLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -346,7 +333,7 @@ namespace mycc
          * @param expr Operand expression.
          * @return Pointer to the created UnaryOperator node.
          */
-        UnaryOperator* actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr* expr) const;
+        UnaryOperator *actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorKind Kind, Expr *expr) const;
 
         /**
          * @brief Create a binary operator expression.
@@ -356,8 +343,8 @@ namespace mycc
          * @param right Right operand expression.
          * @return Pointer to the created BinaryOperator node.
          */
-        BinaryOperator* actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr* left,
-                                            Expr* right) const;
+        BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left,
+                                            Expr *right) const;
 
         /**
          * @brief Create an assignment expression and validate the lvalue.
@@ -366,7 +353,7 @@ namespace mycc
          * @param right Right-hand side expression.
          * @return Pointer to the created AssignmentOperator node, or nullptr if left is not an lvalue.
          */
-        AssignmentOperator* actOnAssignment(SMLoc Loc, Expr* left, Expr* right) const;
+        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const;
 
         /**
          * @brief Create a prefix increment/decrement expression and validate the lvalue.
@@ -375,7 +362,7 @@ namespace mycc
          * @param expr Operand expression (must be an lvalue).
          * @return Pointer to the created PrefixOperator node, or nullptr if expr is not an lvalue.
          */
-        PrefixOperator* actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr* expr) const;
+        PrefixOperator *actOnPrefixOperator(SMLoc Loc, PrefixOperator::PrefixOpKind Kind, Expr *expr) const;
 
         /**
          * @brief Create a postfix increment/decrement expression and validate the lvalue.
@@ -384,7 +371,7 @@ namespace mycc
          * @param expr Operand expression (must be an lvalue).
          * @return Pointer to the created PostfixOperator node, or nullptr if expr is not an lvalue.
          */
-        PostfixOperator* actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr* expr) const;
+        PostfixOperator *actOnPostfixOperator(SMLoc Loc, PostfixOperator::PostfixOpKind Kind, Expr *expr) const;
 
         /**
          * @brief Resolve an identifier to its unique variable name.
@@ -392,7 +379,7 @@ namespace mycc
          * @param Name Variable name to look up.
          * @return Pointer to Var node with the unique name, or nullptr if undeclared.
          */
-        [[nodiscard]] Var* actOnIdentifier(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnIdentifier(SMLoc Loc, StringRef Name) const;
 
         /**
          * @brief Create a conditional (ternary) expression.
@@ -402,7 +389,7 @@ namespace mycc
          * @param right False branch expression.
          * @return Pointer to the created ConditionalExpr node.
          */
-        ConditionalExpr* actOnTernaryOperator(SMLoc Loc, Expr* left, Expr* middle, Expr* right) const;
+        ConditionalExpr *actOnTernaryOperator(SMLoc Loc, Expr *left, Expr *middle, Expr *right) const;
 
         /**
          * @brief Create a function call expression. The calling function
@@ -413,9 +400,9 @@ namespace mycc
          * @param args List of argument expressions.
          * @return Pointer to the created FunctionCallExpr node.
          */
-        FunctionCallExpr* actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList& args) const;
+        FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const;
 
-        CastExpr* actOnCastOperator(SMLoc Loc, Expr* expr, std::unique_ptr<Type> type);
+        CastExpr *actOnCastOperator(SMLoc Loc, Expr *expr, std::unique_ptr<Type> type);
     };
 
     /**
@@ -425,18 +412,15 @@ namespace mycc
      * Automatically enters a scope on construction and exits on destruction,
      * ensuring proper scope cleanup even in the presence of exceptions.
      */
-    class EnterDeclScope
-    {
-        Sema& Semantics;
+    class EnterDeclScope {
+        Sema &Semantics;
 
     public:
-        EnterDeclScope(Sema& Semantics) : Semantics(Semantics)
-        {
+        EnterDeclScope(Sema &Semantics) : Semantics(Semantics) {
             Semantics.enterScope();
         }
 
-        ~EnterDeclScope()
-        {
+        ~EnterDeclScope() {
             Semantics.exitScope();
         }
     };
