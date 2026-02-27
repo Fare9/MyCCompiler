@@ -19,7 +19,11 @@ include_directories(include)
 
 add_subdirectory(lib)
 
-add_executable(mycc main.cpp)
+add_executable(mycc main.cpp
+        include/mycc/Sema/Analyses/LoopLabelAssigner.hpp
+        include/mycc/Sema/Analyses/BreakableContext.hpp
+        include/mycc/Sema/Analyses/LabelGenerator.hpp
+        include/mycc/AST/ASTUtils.hpp)
 
 target_link_libraries(mycc
         fmt::fmt

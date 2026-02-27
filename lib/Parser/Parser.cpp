@@ -1074,13 +1074,13 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
 
             advance(); // consume '?'
 
-            Expr *middle, *right;
+            Expr *middle, *after_middle;
             // first we parse a middle expression
             parseMiddle(middle);
             // then we parse the right one after ":"
-            parseExpr(right, precedence);
+            parseExpr(after_middle, precedence);
 
-            left = Actions.actOnTernaryOperator(Loc, left, middle, right);
+            left = Actions.actOnTernaryOperator(Loc, left, middle, after_middle);
         }
         // any other binary operator
         else {

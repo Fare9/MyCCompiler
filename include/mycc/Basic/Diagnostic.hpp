@@ -6,13 +6,9 @@
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 
-
-
 #include <fmt/format.h>
 
-
 namespace mycc {
-
 namespace diag {
 
 /// @brief All the diagnostic levels and the error message

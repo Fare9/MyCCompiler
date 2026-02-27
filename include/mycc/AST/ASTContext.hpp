@@ -2,9 +2,7 @@
 #pragma once
 
 #include "mycc/Basic/LLVM.hpp"
-#include "llvm/Support/SourceMgr.h"
 #include <memory>
-#include <vector>
 #include <deque>
 
 namespace mycc {
@@ -16,6 +14,11 @@ class VarDeclaration;
 class FunctionDeclaration;
 class Program;
 
+/**
+ * @brief ASTContext class keeps the memory from all the possibles nodes
+ * that the AST can have. In this way, any node we have will be released once
+ * this ASTContext is destroyed.
+ */
 class ASTContext {
     llvm::SourceMgr &SrcMgr;
     StringRef FileName;
@@ -39,15 +42,15 @@ public:
     ASTContext(ASTContext&&) = delete;
     ASTContext& operator=(ASTContext&&) = delete;
 
-    StringRef getFileName() const {
+    [[nodiscard]] StringRef getFileName() const {
         return FileName;
     }
 
-    llvm::SourceMgr & getSourceMgr() {
+    SourceMgr & getSourceMgr() {
         return SrcMgr;
     }
 
-    const llvm::SourceMgr & getSourceMgr() const {
+    [[nodiscard]] const SourceMgr & getSourceMgr() const {
         return SrcMgr;
     }
     

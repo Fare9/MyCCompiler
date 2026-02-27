@@ -10,7 +10,6 @@
 #include <vector>
 #include <optional>
 #include <memory>
-#include <fmt/core.h>
 
 #include "AST.hpp"
 
@@ -342,7 +341,7 @@ namespace mycc {
         StringRef Label;
 
     public:
-        LabelStatement(StringRef Label) : Statement(SK_Label), Label(Label) {
+        explicit LabelStatement(const StringRef Label) : Statement(SK_Label), Label(Label) {
         }
 
         ~LabelStatement() override = default;
@@ -425,7 +424,6 @@ namespace mycc {
 
     /// @brief AST node for a `while (condition) body` loop.
     class WhileStatement : public Statement {
-    private:
         // condition inside of while statement
         Expr *Condition;
         // Body of the while condition
@@ -556,6 +554,10 @@ namespace mycc {
         }
 
         [[nodiscard]] Expr *getValue() const { return Value; }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Case;
+        }
     };
 
     /// @brief AST node for a `default:` label inside a switch statement.
@@ -573,6 +575,10 @@ namespace mycc {
 
         [[nodiscard]] std::string_view get_label() const {
             return label;
+        }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Default;
         }
     };
 
@@ -600,6 +606,10 @@ namespace mycc {
 
         [[nodiscard]] std::string_view get_break_label() const {
             return this->break_label;
+        }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Switch;
         }
     };
 
@@ -638,6 +648,7 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for a long literal constant (e.g. '1000L').
     class LongLiteral : public Expr {
         SMLoc Loc;
         llvm::APSInt Value;
@@ -804,11 +815,11 @@ namespace mycc {
 
         ~AssignmentOperator() override = default;
 
-        Expr *getLeft() const {
+        [[nodiscard]] Expr *getLeft() const {
             return left;
         }
 
-        Expr *getRight() const {
+        [[nodiscard]] Expr *getRight() const {
             return right;
         }
 
@@ -954,9 +965,10 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for the cast expression ('(int) expr').
     class CastExpr : public Expr {
         SMLoc Loc;
-        Expr *expr; // the expression that will be casted to
+        Expr *expr; // the expression that will be cast to
         std::unique_ptr<Type> castType;
     public:
         CastExpr(Expr * expr, std::unique_ptr<Type> castType) :
@@ -988,6 +1000,7 @@ namespace mycc {
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
         std::optional<StorageClass> storageClass;
+        // Type associated to the declared variable.
         std::unique_ptr<Type> varType;
         // For static local variables, stores the unique global name (e.g., "func.var.1")
         std::optional<std::string> uniqueName;
@@ -1064,11 +1077,11 @@ namespace mycc {
             : Loc(Loc), Name(Name), args(std::move(args)) {
         }
 
-        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
             : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
         }
 
-        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType> funcType)
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType> funcType)
             : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass), funcType(std::move(funcType)) {
         }
 
@@ -1103,7 +1116,8 @@ namespace mycc {
             body.emplace_back(s);
         }
 
-        Var *getArg(size_t i) {
+        [[nodiscard]] Var *getArg(const size_t i) const
+        {
             return i >= args.size() ? nullptr : args.at(i);
         }
 
