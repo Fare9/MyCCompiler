@@ -141,6 +141,10 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
             return printFunctionCallExpr(dynamic_cast<const FunctionCallExpr*>(expr), indent);
         case Expr::Ek_Cast:
             return printCastExpr(dynamic_cast<const CastExpr*>(expr), indent);
+        case Expr::Ek_IntInit:
+            return printIntInit(dynamic_cast<const IntInit*>(expr), indent);
+        case Expr::Ek_LongInit:
+            return printLongInit(dynamic_cast<const LongInit*>(expr), indent);
     }
     return getIndent(indent) + "Unknown Expression\n";
 }
@@ -159,6 +163,14 @@ std::string ASTPrinter::printIntegerLiteral(const IntegerLiteral* expr, int inde
 
 std::string ASTPrinter::printLongLiteral(const LongLiteral* expr, int indent) {
     return getIndent(indent) + "LongLiteral: " + std::to_string(expr->getValue().getSExtValue()) + "\n";
+}
+
+std::string ASTPrinter::printIntInit(const IntInit* expr, int indent) {
+    return getIndent(indent) + "IntInit: " + std::to_string(expr->getValue()) + "\n";
+}
+
+std::string ASTPrinter::printLongInit(const LongInit* expr, int indent) {
+    return getIndent(indent) + "LongInit: " + std::to_string(expr->getValue()) + "\n";
 }
 
 std::string ASTPrinter::printUnaryOperator(const UnaryOperator* expr, int indent) {
@@ -277,7 +289,7 @@ std::string ASTPrinter::printNullStatement(const NullStatement* stmt, int indent
 }
 
 std::string ASTPrinter::printVar(const Var* expr, int indent) {
-    return getIndent(indent) + "Var: " + expr->getName().str() + "\n";
+    return getIndent(indent) + "Var: " + expr->getName().str() + "\n" + getIndent(indent + 1) + "Type: " + expr->getType()->to_string()  + "\n";
 }
 
 std::string ASTPrinter::printAssignmentOperator(const AssignmentOperator* expr, int indent) {

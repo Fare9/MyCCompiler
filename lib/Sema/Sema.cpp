@@ -48,6 +48,12 @@ Linkage Sema::computeLinkage(std::optional<StorageClass> sc, ScopeType scope) {
     return Linkage::None; // a local definition without storage class, has no linkage.
 }
 
+Expr *Sema::actOnStaticInit(Type *targetType, int64_t rawValue) const {
+    if (targetType == Context.getIntTy())
+        return Context.createExpression<IntInit>(static_cast<int32_t>(rawValue));
+    return Context.createExpression<LongInit>(rawValue);
+}
+
 Expr *Sema::coerce(SMLoc Loc, Expr *expr, Type *targetType) const {
     auto exprType = typeExpressionInference->getType(expr, CurrentScope);
     if (exprType == nullptr) return nullptr;
@@ -378,7 +384,9 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
         if (initExpr != nullptr) {
             if (ASTUtils::isConstantExpression(initExpr)) {
                 initialValue = InitialValue::Initial;
-                constantValue = ASTUtils::evaluateConstantExpression(initExpr);
+                int64_t rawValue = ASTUtils::evaluateConstantExpression(initExpr);
+                constantValue = rawValue;
+                initExpr = actOnStaticInit(decl->getType(), rawValue);
             } else {
                 if (shouldError(true, [&] { Diags.report(SMLoc(), diag::err_non_constant_initializer); }))
                     return true;
@@ -418,7 +426,9 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
         // more expression types
         if (ASTUtils::isConstantExpression(initExpr)) {
             initialValue = InitialValue::Initial;
-            constantValue = ASTUtils::evaluateConstantExpression(initExpr);
+            int64_t rawValue = ASTUtils::evaluateConstantExpression(initExpr);
+            constantValue = rawValue;
+            initExpr = actOnStaticInit(type, rawValue);
         } else {
             // Non-constant initializer at file scope is an error
             if (shouldError(true, [&] { Diags.report(Loc, diag::err_non_constant_initializer); }))

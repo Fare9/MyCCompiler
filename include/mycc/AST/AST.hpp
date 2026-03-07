@@ -211,6 +211,8 @@ namespace mycc {
             Ek_ConditionalOperator,
             Ek_FunctionCallOperator,
             Ek_Cast,
+            Ek_IntInit,   // compile-time int constant for static storage (may be truncated)
+            Ek_LongInit,  // compile-time long constant for static storage
         };
 
     private:
@@ -699,6 +701,32 @@ namespace mycc {
         static bool classof(const Expr *E) {
             return E->getKind() == Ek_Long;
         }
+    };
+
+    /// @brief Compile-time int initializer for static storage duration variables.
+    /// Carries a value already truncated to 32-bit int range.
+    /// Used instead of CastExpr so IRGen can emit a constant directly.
+    class IntInit : public Expr {
+        int32_t Value;
+    public:
+        explicit IntInit(int32_t Value) : Expr(Ek_IntInit), Value(Value) {}
+
+        [[nodiscard]] int32_t getValue() const { return Value; }
+
+        static bool classof(const Expr *E) { return E->getKind() == Ek_IntInit; }
+    };
+
+    /// @brief Compile-time long initializer for static storage duration variables.
+    /// Carries a value already extended to 64-bit long range.
+    /// Used instead of CastExpr so IRGen can emit a constant directly.
+    class LongInit : public Expr {
+        int64_t Value;
+    public:
+        explicit LongInit(int64_t Value) : Expr(Ek_LongInit), Value(Value) {}
+
+        [[nodiscard]] int64_t getValue() const { return Value; }
+
+        static bool classof(const Expr *E) { return E->getKind() == Ek_LongInit; }
     };
 
     /// @brief AST node for a variable reference expression (an identifier

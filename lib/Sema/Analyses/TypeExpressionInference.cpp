@@ -62,6 +62,8 @@ Type *TypeExpressionInference::getType(Expr *expr, Scope *scope) {
         case Expr::Ek_ConditionalOperator: return getType(llvm::cast<ConditionalExpr>(expr), scope);
         case Expr::Ek_FunctionCallOperator:return getType(llvm::cast<FunctionCallExpr>(expr), scope);
         case Expr::Ek_Cast:                return getType(llvm::cast<CastExpr>(expr), scope);
+        case Expr::Ek_IntInit:             expr->setType(Context.getIntTy());  return expr->getType();
+        case Expr::Ek_LongInit:            expr->setType(Context.getLongTy()); return expr->getType();
         default:                           return nullptr;
     }
 }

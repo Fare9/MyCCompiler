@@ -62,6 +62,11 @@ namespace mycc {
 
         Expr* coerce(SMLoc Loc, Expr *expr, Type *targetType) const;
 
+        /// @brief Create a typed compile-time initializer for static storage.
+        /// Converts rawValue to the correct width for targetType and returns
+        /// an IntInit or LongInit node that IRGen can emit directly.
+        [[nodiscard]] Expr* actOnStaticInit(Type *targetType, int64_t rawValue) const;
+
         template<typename F>
         [[nodiscard]] bool shouldError(bool condition, F &&report) const {
             if (!avoid_errors && condition) {

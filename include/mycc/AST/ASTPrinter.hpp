@@ -38,6 +38,8 @@ private:
     static std::string printDefaultStatement(const DefaultStatement* stmt, int indent);
     static std::string printIntegerLiteral(const IntegerLiteral* expr, int indent);
     static std::string printLongLiteral(const LongLiteral* expr, int indent);
+    static std::string printIntInit(const IntInit* expr, int indent);
+    static std::string printLongInit(const LongInit* expr, int indent);
     static std::string printVar(const Var* expr, int indent);
     static std::string printUnaryOperator(const UnaryOperator* expr, int indent);
     static std::string printBinaryOperator(const BinaryOperator* expr, int indent);
