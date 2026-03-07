@@ -9,6 +9,8 @@
 #include <string>
 #include <set>
 
+#include "Analyses/TypeExpressionInference.hpp"
+
 namespace mycc {
     /**
      * @class Sema
@@ -46,6 +48,10 @@ namespace mycc {
         // Validator to check the GotoLabels
         GotoLabelValidator gotoLabelValidator;
 
+        // Expression Inference pass, it will be used to get the
+        // correct type from the different expressions
+        std::unique_ptr<TypeExpressionInference> typeExpressionInference;
+
         /**
          * Compute the Linkage depending on the Storage class and the scope.
          * @param sc optional value of storage class.
@@ -53,6 +59,17 @@ namespace mycc {
          * @return linkage type.
          */
         static Linkage computeLinkage(std::optional<StorageClass> sc, ScopeType scope);
+
+        Expr* coerce(SMLoc Loc, Expr *expr, Type *targetType) const;
+
+        template<typename F>
+        [[nodiscard]] bool shouldError(bool condition, F &&report) const {
+            if (!avoid_errors && condition) {
+                std::forward<F>(report)();
+                return true;
+            }
+            return false;
+        }
 
     public:
         /**
@@ -62,7 +79,10 @@ namespace mycc {
          */
         explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context),
                                                                        GlobalSymbolTable(nullptr),
-                                                                       CurrentScope(nullptr) {
+                                                                       CurrentScope(nullptr),
+                                                                       typeExpressionInference(
+                                                                           std::make_unique<TypeExpressionInference>(
+                                                                               Context)) {
             initialize();
         }
 
@@ -130,15 +150,16 @@ namespace mycc {
          */
         FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
                                                       std::optional<StorageClass> storageClass,
-                                                      std::unique_ptr<FunctionType> &funcType);
+                                                      FunctionType *funcType);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
          * @param Loc Source location of the parameter.
          * @param Name Parameter name.
+         * @param type Type of the parameter.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name, Type *type) const;
 
         /**
          * @brief Process a local variable declaration and add it to the current scope.
@@ -153,7 +174,7 @@ namespace mycc {
          * @return true on error, false on success.
          */
         bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
-                                 std::optional<StorageClass> storageClass, std::unique_ptr<Type> &type);
+                                 std::optional<StorageClass> storageClass, Type *type);
 
         /**
          * @brief Validate and set the initializer for a variable declaration.
@@ -189,7 +210,7 @@ namespace mycc {
          */
         [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
                                                                 std::optional<StorageClass> storageClass,
-                                                                std::unique_ptr<Type> &type);
+                                                                Type *type);
 
         /**
          * @brief Create a return statement.
@@ -344,7 +365,7 @@ namespace mycc {
          * @return Pointer to the created BinaryOperator node.
          */
         BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left,
-                                            Expr *right) const;
+                                            Expr *right);
 
         /**
          * @brief Create an assignment expression and validate the lvalue.
@@ -353,7 +374,7 @@ namespace mycc {
          * @param right Right-hand side expression.
          * @return Pointer to the created AssignmentOperator node, or nullptr if left is not an lvalue.
          */
-        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const;
+        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right);
 
         /**
          * @brief Create a prefix increment/decrement expression and validate the lvalue.
@@ -402,7 +423,7 @@ namespace mycc {
          */
         FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const;
 
-        CastExpr *actOnCastOperator(SMLoc Loc, Expr *expr, std::unique_ptr<Type> type);
+        CastExpr *actOnCastOperator(SMLoc Loc, Expr *expr, Type *type) const;
     };
 
     /**

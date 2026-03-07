@@ -7,6 +7,9 @@
 using namespace mycc;
 
 namespace {
+
+    /// ToDo: This part will need better work once we add more types.
+
     /// Bitmask for type-specifier keywords. Adding a new keyword only requires
     /// a new bit here, a new entry in typeBitMap, and new rows in validTypeSpecs.
     enum TypeSpecBit : unsigned {
@@ -54,7 +57,7 @@ namespace {
     ///                           storage-class keyword (for diagnostics).
     /// @return the resolved Type, or nullptr if no type keyword was present
     ///         (caller should report) or if an error was already reported.
-    std::unique_ptr<Type> parseType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok,
+    Type* parseType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok, ASTContext &Ctx,
                                     std::optional<StorageClass> *outStorageClass = nullptr,
                                     SMLoc *outStorageClassLoc = nullptr) {
         unsigned seen = 0;
@@ -83,7 +86,7 @@ namespace {
             Lex.next(Tok);
         }
 
-        // both static and extern is not psosible
+        // both static and extern is not possible
         if (seenStatic && seenExtern) {
             Diag.report(Tok.getLocation(), diag::err_declaration_conflicting_storage_class);
             return nullptr;
@@ -100,9 +103,13 @@ namespace {
             return nullptr;
 
         for (const auto &[bits, kind] : validTypeSpecs)
-            if (bits == seen)
-                return std::make_unique<BuiltinType>(kind);
-
+            if (bits == seen) {
+                switch (kind) {
+                    case BuiltinType::Int:  return Ctx.getIntTy();
+                    case BuiltinType::Long: return Ctx.getLongTy();
+                    case BuiltinType::Void: return Ctx.getVoidTy();
+                }
+            }
         Diag.report(Tok.getLocation(), diag::err_declaration_has_type);
         return nullptr;
     }
@@ -110,12 +117,12 @@ namespace {
     /// @brief Parse a type-specifier sequence for a function parameter and push
     /// the result into argTypes. Storage-class keywords are not consumed here.
     /// @return true on success, false if no type keyword was found.
-    bool parseParamType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok,
-                        std::vector<std::unique_ptr<Type>> &argTypes) {
-        std::unique_ptr<Type> type = parseType(Lex, Diag, Tok);
+    bool parseParamType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok, ASTContext &Ctx,
+                        std::vector<Type*> &argTypes) {
+        Type *type = parseType(Lex, Diag, Tok, Ctx);
         if (!type)
             return false;
-        argTypes.push_back(std::move(type));
+        argTypes.push_back(type);
         return true;
     }
 }
@@ -174,7 +181,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     if (Tok.is(tok::l_paren)) {
         // Function declaration
         FunctionDeclaration *Func = nullptr;
-        if (!parseFunctionRest(Func, loc, name, storageClass, std::unique_ptr<Type>(type)))
+        if (parseFunctionRest(Func, loc, name, storageClass, type))
             return true;
 
         // Check for duplicate declarations
@@ -195,7 +202,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     } else {
         // Variable declaration
         VarDeclaration *Var = nullptr;
-        if (!parseGlobalVarRest(Var, loc, name, storageClass, std::unique_ptr<Type>(type)))
+        if (parseGlobalVarRest(Var, loc, name, storageClass, type))
             return true;
 
         Decls.emplace_back(Var);
@@ -212,7 +219,7 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
     type = nullptr;
 
     SMLoc scLoc;
-    auto parsedType = parseType(Lex, getDiagnostics(), Tok, &storageClass, &scLoc);
+    auto parsedType = parseType(Lex, getDiagnostics(), Tok, Context, &storageClass, &scLoc);
 
     // If a storage-class was found but isn't allowed here (e.g. inside a for-loop
     // init), report at the precise location of that keyword.
@@ -236,7 +243,7 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
         return true;
     }
 
-    type = parsedType.release();
+    type = parsedType;
     name = Tok.getIdentifier();
     loc = Tok.getLocation();
     advance();
@@ -245,16 +252,16 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
 }
 
 bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef funcName,
-                               std::optional<StorageClass> storageClass, std::unique_ptr<Type> retType) {
+                               std::optional<StorageClass> storageClass, Type *retType) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
-        return false;
+        return true;
     };
 
     ArgsList args;
     BlockItems body;
-    std::vector<std::unique_ptr<Type> > argTypes;
+    std::vector<Type*> argTypes;
     bool parsedBody = false;
 
     // consume '('
@@ -273,14 +280,14 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (!parseParamType(Lex, getDiagnostics(), Tok, argTypes))
+        if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
             return _errorhandler();
         // no advance() — parseParamType already consumed all type keywords
 
         if (expect(tok::identifier))
             return _errorhandler();
 
-        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
         if (param)
             args.push_back(param);
         advance();
@@ -288,14 +295,14 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
 
-            if (!parseParamType(Lex, getDiagnostics(), Tok, argTypes))
+            if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
                 return _errorhandler();
             // no advance() — parseParamType already consumed all type keywords
 
             if (expect(tok::identifier))
                 return _errorhandler();
 
-            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
             if (!param)
                 return _errorhandler();
             args.push_back(param);
@@ -307,7 +314,7 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         return _errorhandler();
 
     // Generate a new function or obtain a previous one
-    auto funcType = std::make_unique<FunctionType>(std::move(retType), std::move(argTypes));
+    auto *funcType = Context.createType<FunctionType>(retType, std::move(argTypes));
     F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass, funcType);
     if (!F)
         return _errorhandler();
@@ -352,15 +359,15 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
     // and the break/continue
     Actions.assignLoopLabels(*F);
 
-    return true;
+    return false;
 }
 
 bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
-                                std::optional<StorageClass> storageClass, std::unique_ptr<Type> type) {
+                                std::optional<StorageClass> storageClass, Type *type) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
-        return false;
+        return true;
     };
 
     Expr *initExpr = nullptr;
@@ -380,7 +387,7 @@ bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
     if (!V)
         return _errorhandler();
 
-    return true;
+    return false;
 }
 
 
@@ -399,11 +406,11 @@ bool Parser::parseBlock(BlockItems &Items) {
             // Check if it's a function (has '(') or variable (has '=' or ';')
             if (Tok.is(tok::l_paren)) {
                 // Function declaration in block
-                if (parseFunctionDeclarationStmt(Items, loc, name, std::unique_ptr<Type>(type), storageClass))
+                if (parseFunctionDeclarationStmt(Items, loc, name, type, storageClass))
                     return true;
             } else {
                 // Variable declaration
-                if (parseVariableDeclInline(Items, loc, name, std::unique_ptr<Type>(type), storageClass))
+                if (parseVariableDeclInline(Items, loc, name, type, storageClass))
                     return true;
             }
         } else {
@@ -424,8 +431,7 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
         return true;
 
     // Add variable to scope first (so it can be referenced in initializer)
-    auto typePtr = std::unique_ptr<Type>(type);
-    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass, typePtr))
+    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass, type))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
@@ -833,11 +839,11 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
     return false;
 }
 
-bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> retType,
+bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, Type *retType,
                                           std::optional<StorageClass> storageClass) {
     ArgsList args;
     BlockItems body;
-    std::vector<std::unique_ptr<Type> > argTypes;
+    std::vector<Type*> argTypes;
 
     bool parsedBody = false;
 
@@ -850,27 +856,27 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (!parseParamType(Lex, getDiagnostics(), Tok, argTypes))
+        if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
             return true;
         // no advance() — parseParamType already consumed all type keywords
 
         if (expect(tok::identifier))
             return true;
 
-        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
         if (param)
             args.push_back(param);
         advance();
 
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
-            if (!parseParamType(Lex, getDiagnostics(), Tok, argTypes))
+            if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
                 return true;
             // no advance() — parseParamType already consumed all type keywords
             if (expect(tok::identifier))
                 return true;
 
-            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
             if (param)
                 args.push_back(param);
             advance();
@@ -881,7 +887,7 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         return true;
 
     // Create a Function object with no body (declaration only)
-    auto funcType = std::make_unique<FunctionType>(std::move(retType), std::move(argTypes));
+    auto *funcType = Context.createType<FunctionType>(retType, std::move(argTypes));
     FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass, funcType);
     if (!F)
         return true;
@@ -927,7 +933,7 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
 }
 
 bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
-                                     std::unique_ptr<Type> type,
+                                     Type *type,
                                      std::optional<StorageClass> storageClass) {
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
@@ -1257,7 +1263,7 @@ bool Parser::parseFactor(Expr *&E) {
     else if(Tok.is(tok::l_paren)) {
         advance();
         SMLoc typeLoc = Tok.getLocation();
-        auto type = parseType(Lex, getDiagnostics(), Tok);
+        auto *type = parseType(Lex, getDiagnostics(), Tok, Context);
 
         if (type == nullptr) {
             if (parseExpr(E, 0))
@@ -1278,11 +1284,14 @@ bool Parser::parseFactor(Expr *&E) {
         }
         else {
             // parseType already advanced past all type keywords; Tok is now ')'
+            // Use parseFactor (not parseExpr) so the cast binds tightly, matching
+            // the C grammar: cast-expression → ( type-name ) cast-expression
+            // e.g. `(long) i = 10` → `((long)i) = 10`, NOT `(long)(i = 10)`
             if (consume(tok::r_paren))
                 return _errorhandler();
-            if (parseExpr(E, 0))
+            if (parseFactor(E))
                 return _errorhandler();
-            E = Actions.actOnCastOperator(typeLoc, E, std::move(type));
+            E = Actions.actOnCastOperator(typeLoc, E, type);
         }
     } else {
         return _errorhandler();

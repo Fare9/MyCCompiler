@@ -21,6 +21,8 @@ DIAG(err_wrong_argument_call, Error, "Error, function '{}' called with {} parame
 DIAG(err_incorrect_lvalue, Error, "Invalid lvalue used")
 DIAG(err_existing_label, Error, "Error, the label {} already exists in the function")
 DIAG(err_undefined_label, Error, "use of undeclared label '{}'")
+DIAG(err_non_compatible_types, Error, "Error, the types from left and right side are not compatible")
+DIAG(err_var_with_other_type_declared, Error, "Error, the variable {} was already declared with other type")
 
 DIAG(err_expected_statement_after_label, Error, "Error, expected a statement after a label, not a declaration")
 DIAG(err_label_cannot_end_block, Error, "Error, label cannot be the last statement of a block")

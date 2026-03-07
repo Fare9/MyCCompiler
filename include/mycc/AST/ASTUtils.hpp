@@ -8,7 +8,7 @@ namespace mycc
     public:
         static bool isConstantExpression(Expr* expr)
         {
-            return expr->getKind() == Expr::Ek_Int;
+            return expr->getKind() == Expr::Ek_Int || expr->getKind() == Expr::Ek_Long;
         }
 
         static int64_t evaluateConstantExpression(Expr* expr)

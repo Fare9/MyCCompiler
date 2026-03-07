@@ -57,6 +57,10 @@ namespace mycc {
         [[nodiscard]] TypeKind getKind() const { return Kind; }
 
         virtual std::string to_string() = 0;
+
+        [[nodiscard]] virtual bool equal(const Type &other) const {
+            return Kind == other.Kind;
+        }
     };
 
     /// @brief Represents a built-in primitive type (e.g. `int`, `void`).
@@ -92,6 +96,11 @@ namespace mycc {
             }
         }
 
+        [[nodiscard]] bool equal(const Type &other) const override {
+            if (other.getKind() != TK_Builtin) return false;
+            return BuiltinK == llvm::cast<BuiltinType>(&other)->getBuiltinKind();
+        }
+
         static bool classof(const Type *T) {
             return T->getKind() == TK_Builtin;
         }
@@ -100,23 +109,23 @@ namespace mycc {
     /// @brief Represents a Function type, it contains return types, and argument types.
     class FunctionType : public Type {
         std::string funcTypeStr;
-        std::unique_ptr<Type> retType;
-        std::vector<std::unique_ptr<Type>> argType;
+        Type *retType;
+        std::vector<Type*> argType;
 
     public:
-        FunctionType(std::unique_ptr<Type> retType, std::vector<std::unique_ptr<Type>> argType) : Type(TK_Function),
-            retType(std::move(retType)), argType(std::move(argType)) {
+        FunctionType(Type *retType, std::vector<Type*> argType) : Type(TK_Function),
+            retType(retType), argType(std::move(argType)) {
         }
 
         ~FunctionType() override = default;
 
         /// @return reference to the return type
-        [[nodiscard]] const Type &getReturnType() const {
-            return *retType;
+        [[nodiscard]] Type *getReturnType() const {
+            return retType;
         }
 
         /// @return reference to the vector with the argument types
-        [[nodiscard]] const std::vector<std::unique_ptr<Type>> &getArgTypes() const {
+        [[nodiscard]] const std::vector<Type*> &getArgTypes() const {
             return argType;
         }
 
@@ -125,13 +134,23 @@ namespace mycc {
                 return funcTypeStr;
             funcTypeStr += retType->to_string() + " ";
             funcTypeStr += "(";
-            for (const auto &arg : argType) {
+            for (auto *arg : argType) {
                 funcTypeStr += arg->to_string() + ",";
             }
             if (!argType.empty())
                 funcTypeStr.pop_back();
             funcTypeStr += ")";
             return funcTypeStr;
+        }
+
+        [[nodiscard]] bool equal(const Type &other) const override {
+            if (other.getKind() != TK_Function) return false;
+            const auto &ft = *llvm::cast<FunctionType>(&other);
+            if (!retType->equal(*ft.getReturnType())) return false;
+            if (argType.size() != ft.getArgTypes().size()) return false;
+            for (size_t i = 0; i < argType.size(); ++i)
+                if (!argType[i]->equal(*ft.getArgTypes()[i])) return false;
+            return true;
         }
 
         static bool classof(const Type *T) {
@@ -196,9 +215,14 @@ namespace mycc {
 
     private:
         const ExprKind Kind;
+        Type* varType = nullptr;
 
     protected:
         explicit Expr(ExprKind Kind) : Kind(Kind) {
+        }
+
+        Expr(ExprKind Kind, Type* varType) :
+            Kind(Kind), varType(varType) {
         }
 
     public:
@@ -206,6 +230,14 @@ namespace mycc {
 
         [[nodiscard]] ExprKind getKind() const {
             return Kind;
+        }
+
+        void setType(Type* vtype) {
+            this->varType = vtype;
+        }
+
+        [[nodiscard]] Type* getType() const {
+            return varType;
         }
     };
 
@@ -969,10 +1001,10 @@ namespace mycc {
     class CastExpr : public Expr {
         SMLoc Loc;
         Expr *expr; // the expression that will be cast to
-        std::unique_ptr<Type> castType;
+        Type *castType;
     public:
-        CastExpr(Expr * expr, std::unique_ptr<Type> castType) :
-            Expr(Ek_Cast), expr(expr), castType(std::move(castType)) {}
+        CastExpr(Expr *expr, Type *castType) :
+            Expr(Ek_Cast), expr(expr), castType(castType) {}
 
         ~CastExpr() override = default;
 
@@ -980,8 +1012,8 @@ namespace mycc {
             return expr;
         }
 
-        [[nodiscard]] const Type *getCastedType() const {
-            return castType.get();
+        [[nodiscard]] Type *getCastedType() const {
+            return castType;
         }
 
         static bool classof(const Expr *E) {
@@ -1001,7 +1033,7 @@ namespace mycc {
         Expr *expr = nullptr;
         std::optional<StorageClass> storageClass;
         // Type associated to the declared variable.
-        std::unique_ptr<Type> varType;
+        Type* varType;
         // For static local variables, stores the unique global name (e.g., "func.var.1")
         std::optional<std::string> uniqueName;
 
@@ -1016,8 +1048,8 @@ namespace mycc {
             : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass) {
         }
 
-        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass, std::unique_ptr<Type> varType)
-            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass), varType(std::move(varType)) {
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass, Type* varType)
+            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass), varType(varType) {
         }
 
         ~VarDeclaration() = default;
@@ -1050,12 +1082,12 @@ namespace mycc {
             uniqueName = name;
         }
 
-        [[nodiscard]] const Type *getType() const {
-            return varType.get();
+        [[nodiscard]] Type *getType() const {
+            return varType;
         }
 
-        void setType(std::unique_ptr<Type>& type) {
-            varType = std::move(type);
+        void setType(Type* type) {
+            varType = type;
         }
     };
 
@@ -1068,7 +1100,9 @@ namespace mycc {
         ArgsList args;
         bool IsDefinition = false; // True if function has a body (even if empty)
         BlockItems body;
-        std::unique_ptr<FunctionType> funcType;
+        // Type of the function that contains the return
+        // type, and the parameters
+        FunctionType* funcType;
         std::optional<StorageClass> storageClass;
 
 
@@ -1081,8 +1115,8 @@ namespace mycc {
             : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
         }
 
-        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, std::unique_ptr<FunctionType> funcType)
-            : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass), funcType(std::move(funcType)) {
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, FunctionType* funcType)
+            : Loc(Loc), Name(Name), args(std::move(args)), funcType(funcType), storageClass(storageClass) {
         }
 
         ~FunctionDeclaration() = default;
@@ -1162,12 +1196,12 @@ namespace mycc {
             return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
         }
 
-        void setFunctionType(std::unique_ptr<FunctionType>& type) {
-            funcType = std::move(type);
+        void setFunctionType(FunctionType* type) {
+            funcType = type;
         }
 
-        [[nodiscard]] const FunctionType *getFunctionType() const {
-            return funcType.get();
+        [[nodiscard]] FunctionType *getFunctionType() const {
+            return funcType;
         }
     };
 

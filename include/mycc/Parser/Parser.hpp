@@ -118,11 +118,11 @@ namespace mycc {
 
         /// @brief Parse the rest of a function after 'int name' has been consumed
         bool parseFunctionRest(FunctionDeclaration *&F, SMLoc Loc, StringRef Name,
-                               std::optional<StorageClass> storageClass, std::unique_ptr<Type> retType);
+                               std::optional<StorageClass> storageClass, Type *retType);
 
         /// @brief Parse the rest of a global variable after 'int name' has been consumed
         bool parseGlobalVarRest(VarDeclaration *&V, SMLoc Loc, StringRef Name,
-                                std::optional<StorageClass> storageClass, std::unique_ptr<Type> type);
+                                std::optional<StorageClass> storageClass, Type *type);
 
         /// @brief Parse for a possible declaration of a variable, or a function
         /// and if not parse a statement.
@@ -203,7 +203,7 @@ namespace mycc {
         /// @param retType return type of the function
         /// @param storageClass optional storage class (extern/static).
         /// @return `false` if parse was well, `true` otherwise.
-        bool parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> retType,
+        bool parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, Type *retType,
                                           std::optional<StorageClass> storageClass = std::nullopt);
 
         /// @brief Parse the rest of a variable declaration inline (inside a block)
@@ -213,7 +213,7 @@ namespace mycc {
         /// @param Name name of the variable.
         /// @param storageClass optional storage class (extern/static).
         /// @return `false` if parse was well, `true` otherwise.
-        bool parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name, std::unique_ptr<Type> type,
+        bool parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name, Type *type,
                                      std::optional<StorageClass> storageClass = std::nullopt);
 
         /// @brief Parse an expression using precedence climbing.
