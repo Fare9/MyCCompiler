@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
         auto Parser = mycc::Parser(Lexer, Sema, ASTContext);
         mycc::ir::Context Context;
         mycc::ir::Program Program;
-        auto irGen = mycc::codegen::IRGenerator(Context, Program, ASTContext);
+        auto irGen = mycc::codegen::IRGenerator(Context, Program);
         auto x64CodeGen = mycc::codegen::x64::X64CodeGenerator();
 
         if (lexer) {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "mycc/AST/AST.hpp"
-#include "mycc/AST/ASTContext.hpp"
 #include "mycc/Sema/Scope.hpp"
 #include "mycc/IR/SimpleIR.hpp"
 
@@ -13,7 +12,6 @@ namespace mycc::codegen {
 class IRGenerator {
     ir::Context& Ctx;
     ir::Program& IRProg;
-    ASTContext& ASTCtx;
     const Scope* Symbols = nullptr;  // GlobalSymbolTable for looking up variable attributes
 
     // Current function name for generating unique static local names
@@ -44,8 +42,8 @@ class IRGenerator {
     void exitScope(const std::vector<std::string> &declaredVars);
 
 public:
-    IRGenerator(ir::Context& Ctx, ir::Program& IRProg, ASTContext& ASTCtx)
-        : Ctx(Ctx), IRProg(IRProg), ASTCtx(ASTCtx) {}
+    IRGenerator(ir::Context& Ctx, ir::Program& IRProg)
+        : Ctx(Ctx), IRProg(IRProg) {}
     
     // Convert AST Program to IR Program
     void generateIR(const Program& ASTProgram, const Scope& symbols);
@@ -90,6 +88,9 @@ private:
     ir::Value* generateConditionalExpression(const ConditionalExpr& CondExpr, ir::Function* IRFunc);
     ir::Value* generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc);
     ir::Value* generateCastExpression(const CastExpr& CastExpr, ir::Function* IRFunc);
+
+    // Lowers an AST type to an IR type
+    [[nodiscard]] ir::Type* lowerType(Type* astType) const;
 };
 
 }
