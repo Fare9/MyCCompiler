@@ -52,7 +52,7 @@ private:
     // Operand conversion helpers
     X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);
     X64Register* convertRegister(const ir::Reg& Reg, X64Context& Ctx);
-    X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
+    X64Int* convertConstant(const ir::Constant& ConstVal, X64Context& Ctx);
     X64Register* convertVariable(const ir::VarOp& Var, X64Context& Ctx);
     X64Register* convertParameter(const ir::ParameterOp& Var, X64Context& Ctx);
     X64Data* convertStaticVar(const ir::StaticVarOp& Var, X64Context& Ctx);

@@ -33,52 +33,60 @@ bool object = false;
 bool compile = false;
 bool print_output = false;
 
-bool tool_exists(const std::string& tool) {
+bool tool_exists(const std::string &tool) {
     std::string check_cmd = "command -v " + tool + " >/dev/null 2>&1";
     return std::system(check_cmd.c_str()) == 0;
 }
 
 void print_help() {
     std::cout << "mycc - C Compiler\n"
-              << "Usage: mycc [options] <file>\n"
-              << "\nOptions:\n"
-              << "  --lex      Run lexer only\n"
-              << "  --parse    Run lexer and parser\n"
-              << "  --validate Run semantic analysis on top of parser\n"
-              << "  --tacky    Run lexer, parser and generate IR\n"
-              << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
-              << "  --llvm     Generate LLVM IR\n"
-              << "  -c         Instruct the compiler driver to generate an object file\n"
-              << "  --help     Show this help message\n"
-              << "If no option is provided, all the steps will run and the output assembly is generated.\n";
+            << "Usage: mycc [options] <file>\n"
+            << "\nOptions:\n"
+            << "  --lex      Run lexer only\n"
+            << "  --parse    Run lexer and parser\n"
+            << "  --validate Run semantic analysis on top of parser\n"
+            << "  --tacky    Run lexer, parser and generate IR\n"
+            << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
+            << "  --llvm     Generate LLVM IR\n"
+            << "  -c         Instruct the compiler driver to generate an object file\n"
+            << "  --help     Show this help message\n"
+            << "If no option is provided, all the steps will run and the output assembly is generated.\n";
 }
 
 int main(int argc, char **argv) {
     std::vector<std::string> InputFiles;
     std::vector<std::string> args{argv + 1, argv + argc};
 
-    std::unordered_map<std::string, std::function<void()>> options{
-            // main options
-            {"--lex",     [&]() { lexer = true; }},
-            {"--parse",   [&]() {
+    std::unordered_map<std::string, std::function<void()> > options{
+        // main options
+        {"--lex", [&]() { lexer = true; }},
+        {
+            "--parse", [&]() {
                 parser = true;
-            }},
-            {"--validate", [&](){
+            }
+        },
+        {
+            "--validate", [&]() {
                 parser = true;
                 semantic = true;
-            }},
-            {"--tacky", [&]() {
+            }
+        },
+        {
+            "--tacky", [&]() {
                 tacky = true;
-            }},
-            {"--codegen", [&]() {
+            }
+        },
+        {
+            "--codegen", [&]() {
                 codegen = true;
-            }},
-            {"--llvm", [&]() {llvm_gen = true;}},
-            {"-c", [&]() { object = true; }},
-            {"--print",   [&]() { print_output = true; }},
-            // other options
-            {"--help",    [&]() { print_help(); }},
-            {"-h",        [&]() { print_help(); }}
+            }
+        },
+        {"--llvm", [&]() { llvm_gen = true; }},
+        {"-c", [&]() { object = true; }},
+        {"--print", [&]() { print_output = true; }},
+        // other options
+        {"--help", [&]() { print_help(); }},
+        {"-h", [&]() { print_help(); }}
     };
 
     for (const auto &s: args) {
@@ -92,7 +100,7 @@ int main(int argc, char **argv) {
     if (!lexer && !parser && !tacky && !codegen && !llvm_gen) compile = true;
 
     for (const auto &F: InputFiles) {
-        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
+        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer> >
                 FileOrErr = llvm::MemoryBuffer::getFile(F);
 
         llvm::SourceMgr SrcMgr;
@@ -105,7 +113,7 @@ int main(int argc, char **argv) {
         auto Parser = mycc::Parser(Lexer, Sema, ASTContext);
         mycc::ir::Context Context;
         mycc::ir::Program Program;
-        auto irGen = mycc::codegen::IRGenerator(Context, Program);
+        auto irGen = mycc::codegen::IRGenerator(Context, Program, ASTContext);
         auto x64CodeGen = mycc::codegen::x64::X64CodeGenerator();
 
         if (lexer) {
@@ -134,7 +142,7 @@ int main(int argc, char **argv) {
             // run with semantic analysis with errors
             if (!semantic)
                 Sema.avoidErrors();
-            mycc::Program* p = Parser.parse();
+            mycc::Program *p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -147,7 +155,7 @@ int main(int argc, char **argv) {
             }
         }
         if (tacky) {
-            mycc::Program* p = Parser.parse();
+            mycc::Program *p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -161,7 +169,7 @@ int main(int argc, char **argv) {
             }
         }
         if (codegen) {
-            mycc::Program* p = Parser.parse();
+            mycc::Program *p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -179,7 +187,7 @@ int main(int argc, char **argv) {
             }
         }
         if (llvm_gen) {
-            mycc::Program* p = Parser.parse();
+            mycc::Program *p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -211,7 +219,7 @@ int main(int argc, char **argv) {
             std::cout << "LLVM output: " << ll_name << '\n';
         }
         if (compile) {
-            mycc::Program* p = Parser.parse();
+            mycc::Program *p = Parser.parse();
             Lexer.reset();
             if (!p) {
                 std::cerr << "mycc: error: parse error encountered\n";
@@ -260,7 +268,7 @@ int main(int argc, char **argv) {
             std::vector<std::string> compilers = {"clang", "gcc"};
             bool compiled = false;
 
-            for (const auto& compiler : compilers) {
+            for (const auto &compiler: compilers) {
                 if (tool_exists(compiler)) {
                     std::string compile_cmd = compiler;
                     compile_cmd += object ? " -c" : "";

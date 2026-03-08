@@ -67,6 +67,9 @@ namespace mycc {
     class BuiltinType : public Type {
     public:
         enum BuiltinKind {
+            Bool,
+            Char,
+            Short,
             Int,
             Long,
             Void,
@@ -83,8 +86,30 @@ namespace mycc {
 
         [[nodiscard]] BuiltinKind getBuiltinKind() const { return BuiltinK; }
 
+        /// Returns the integer conversion rank for a builtin kind.
+        /// Returns -1 for non-integer types (e.g. Void) so callers can detect errors.
+        static int integerRank(BuiltinType::BuiltinKind K) {
+            switch (K) {
+                case BuiltinType::Bool: return 0;
+                case BuiltinType::Char: return 1;
+                case BuiltinType::Short: return 2;
+                case BuiltinType::Int: return 3;
+                case BuiltinType::Long: return 4;
+                default: return -1; // Void or unknown — not promotable
+            }
+        }
+
+        [[nodiscard]] bool isIntegerType() const { return integerRank(BuiltinK) >= 0; }
+        [[nodiscard]] bool isVoid() const { return BuiltinK == Void; }
+
         std::string to_string() override {
             switch (BuiltinK) {
+                case Bool:
+                    return "bool";
+                case Char:
+                    return "char";
+                case Short:
+                    return "short";
                 case Int:
                     return "int";
                 case Long:

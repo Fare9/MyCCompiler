@@ -453,8 +453,8 @@ namespace mycc::codegen::x64 {
     // ===== Operand Conversion Helpers =====
 
     X64Operand *X64CodeGenerator::convertOperand(const ir::Value *Val, X64Context &Ctx) {
-        if (const auto *Imm = dynamic_cast<const ir::Int *>(Val))
-            return convertInteger(*Imm, Ctx);
+        if (const auto *Imm = dynamic_cast<const ir::Constant *>(Val))
+            return convertConstant(*Imm, Ctx);
         if (const auto *Reg = dynamic_cast<const ir::Reg *>(Val))
             return convertRegister(*Reg, Ctx);
         if (const auto *Var = dynamic_cast<const ir::VarOp *>(Val))
@@ -470,8 +470,8 @@ namespace mycc::codegen::x64 {
         return Ctx.getPseudoReg(Reg.getID());
     }
 
-    X64Int *X64CodeGenerator::convertInteger(const ir::Int &IntVal, X64Context &Ctx) {
-        return Ctx.createInt(IntVal.getValue());
+    X64Int *X64CodeGenerator::convertConstant(const ir::Constant &ConstVal, X64Context &Ctx) {
+        return Ctx.createInt(llvm::APSInt::get(ConstVal.getRawValue()));
     }
 
     X64Register *X64CodeGenerator::convertVariable(const ir::VarOp &Var, X64Context &Ctx) {

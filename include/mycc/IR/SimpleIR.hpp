@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mycc/Basic/LLVM.hpp"
+#include "mycc/AST/AST.hpp"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringMap.h"
@@ -8,7 +9,6 @@
 #include <utility>
 #include <vector>
 #include <memory>
-#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <iostream>
@@ -99,36 +99,36 @@ namespace mycc::ir {
         Operand() = default;
 
         ~Operand() override = default;
+
+        [[nodiscard]] virtual Type* getType() const = 0;
     };
 
-    class Int : public Operand {
-        llvm::APSInt Value;
+    class Constant : public Operand {
+        Type* Ty;
+        int64_t Val;
 
     public:
-        explicit Int(llvm::APSInt Value) : Value(std::move(Value)) {
-        }
+        Constant(Type* ty, int64_t value) : Ty(ty), Val(value) {}
 
-        llvm::APSInt &getValue() {
-            return Value;
-        }
-
-        [[nodiscard]] const llvm::APSInt &getValue() const {
-            return Value;
-        }
+        [[nodiscard]] Type* getType() const override { return Ty; }
+        [[nodiscard]] int32_t getIntValue() const { return static_cast<int32_t>(Val); }
+        [[nodiscard]] int64_t getLongValue() const { return Val; }
+        [[nodiscard]] int64_t getRawValue() const { return Val; }
 
         [[nodiscard]] std::string to_string() const override {
-            return std::to_string(Value.getSExtValue());
+            return std::to_string(Val);
         }
     };
 
     class Reg : public Operand {
         unsigned RegID;
+        Type* Ty;
 
     public:
-        explicit Reg(const unsigned ID) : RegID(ID) {
-        }
+        explicit Reg(unsigned ID, Type* Ty) : RegID(ID), Ty(Ty) {}
 
         [[nodiscard]] unsigned getID() const { return RegID; }
+        [[nodiscard]] Type* getType() const override { return Ty; }
 
         [[nodiscard]] std::string to_string() const override {
             return "%r" + std::to_string(RegID);
@@ -137,12 +137,13 @@ namespace mycc::ir {
 
     class StaticVarOp : public Operand {
         std::string Identifier;
+        Type* Ty;
 
     public:
-        StaticVarOp(const StringRef Identifier) : Identifier(Identifier) {
-        }
+        StaticVarOp(StringRef Identifier, Type* Ty) : Identifier(Identifier), Ty(Ty) {}
 
         [[nodiscard]] std::string getName() const { return Identifier; }
+        [[nodiscard]] Type* getType() const override { return Ty; }
 
         [[nodiscard]] std::string to_string() const override {
             return "@" + Identifier;
@@ -151,12 +152,13 @@ namespace mycc::ir {
 
     class VarOp : public Operand {
         std::string Name;
+        Type* Ty;
 
     public:
-        explicit VarOp(const StringRef Name) : Name(Name) {
-        }
+        explicit VarOp(StringRef Name, Type* Ty) : Name(Name), Ty(Ty) {}
 
         [[nodiscard]] std::string getName() const { return Name; }
+        [[nodiscard]] Type* getType() const override { return Ty; }
 
         [[nodiscard]] std::string to_string() const override {
             return "%" + Name;
@@ -165,12 +167,13 @@ namespace mycc::ir {
 
     class ParameterOp : public Operand {
         std::string Name;
+        Type* Ty;
 
     public:
-        explicit ParameterOp(const StringRef Name) : Name(Name) {
-        }
+        explicit ParameterOp(StringRef Name, Type* Ty) : Name(Name), Ty(Ty) {}
 
         [[nodiscard]] std::string getName() const { return Name; }
+        [[nodiscard]] Type* getType() const override { return Ty; }
 
         [[nodiscard]] std::string to_string() const override {
             return "%" + Name;
@@ -717,29 +720,90 @@ namespace mycc::ir {
         }
     };
 
+    class SignExtend : public Instruction {
+        Reg *Result = nullptr;
+    public:
+        SignExtend() = default;
+
+        SignExtend(Value *Src, Reg *Result) : Result(Result) {
+            addOperand(Src);
+        }
+
+        [[nodiscard]] Value *getSource() const {
+            assert(getNumOperands() > 0 && "No operands to retrieve.");
+            return getOperand(0);
+        }
+
+        [[nodiscard]] Reg *getResult() const { return Result; }
+
+        [[nodiscard]] StringRef getOpcodeName() const override {
+            return "se";
+        }
+
+        [[nodiscard]] std::string to_string() const override {
+            return Result->to_string() + " = se " + getSource()->to_string();
+        }
+    };
+
+    class Truncate : public Instruction {
+        Value *Result = nullptr;
+    public:
+        Truncate() = default;
+
+        Truncate(Value *source, Value *Result) : Result(Result) {
+            addOperand(source);
+        }
+
+        [[nodiscard]] Value *getSource() const {
+            assert(getNumOperands() > 0 && "No operands to retrieve.");
+            return getOperand(0);
+        }
+
+        [[nodiscard]] Value *getResult() const { return Result; }
+
+        [[nodiscard]] StringRef getOpcodeName() const override {
+            return "tru";
+        }
+
+        [[nodiscard]] std::string to_string() const override {
+            return Result->to_string() + " = tru " + getSource()->to_string();
+        }
+    };
+
     class StaticVariable {
         std::string Identifier;
         bool Global;
-        int InitialValue;
+        std::int64_t initValue = 0;
+        Type* type = nullptr;
+        Expr* init = nullptr;
 
     public:
-        StaticVariable(const StringRef Identifier, const bool Global, const int InitialValue = 0)
-            : Identifier(Identifier), Global(Global), InitialValue(InitialValue) {
+        StaticVariable(const StringRef Identifier, const bool Global, Type *type, Expr *init)
+            : Identifier(Identifier), Global(Global), type(type), init(init) {
+            assert(llvm::isa<IntInit>(init) || llvm::isa<LongInit>(init));
         }
 
         [[nodiscard]] std::string getName() const { return Identifier; }
 
         [[nodiscard]] bool isGlobal() const { return Global; }
 
-        [[nodiscard]] int getInitialValue() const { return InitialValue; }
+        [[nodiscard]] std::int64_t getInitialValue() const { return initValue; }
+
+        [[nodiscard]] Type* getType() const { return type; }
+
+        [[nodiscard]] Expr* getInit() const { return init; }
 
         [[nodiscard]] std::string to_string() const {
             // Format: @name = [internal] global i32 <value>
             std::string result = "@" + Identifier + " = ";
-            if (!Global) {
+            if (!Global)
                 result += "internal ";
+            auto *bt = llvm::cast<BuiltinType>(type);
+            if (bt->getBuiltinKind() == BuiltinType::Int) {
+                result += "global i32 " + std::to_string(llvm::cast<IntInit>(init)->getValue());
+            } else {
+                result += "global i64 " + std::to_string(llvm::cast<LongInit>(init)->getValue());
             }
-            result += "global i32 " + std::to_string(InitialValue);
             return result;
         }
     };
@@ -937,7 +1001,8 @@ namespace mycc::ir {
         StringMap<VarOp *> Variables;
         StringMap<StaticVarOp *> StaticVars;
         std::unordered_map<std::string, Label *> Labels;
-        std::unordered_map<std::int64_t, Int *> all_integer_values;
+        std::unordered_map<int32_t, Constant *> all_int_constants;
+        std::unordered_map<int64_t, Constant *> all_long_constants;
         std::vector<std::unique_ptr<Value> > Values;
         unsigned NextRegID = 0;
         unsigned LabelNextID = 0;
@@ -982,46 +1047,55 @@ namespace mycc::ir {
             return jnz;
         }
 
-        // Factory methods for creating Values
-        Int *createInt(llvm::APSInt Value) {
-            const std::int64_t s_ext = Value.getSExtValue();
-            if (all_integer_values.contains(s_ext))
-                return all_integer_values[s_ext];
-            auto *IntVal = new Int(std::move(Value));
-            Values.emplace_back(IntVal);
-            all_integer_values[s_ext] = IntVal;
-            return IntVal;
+        // Factory methods for creating Constants
+        Constant *createConstant(Type* ty, int64_t value) {
+            auto* bt = llvm::cast<BuiltinType>(ty);
+            if (bt->getBuiltinKind() == BuiltinType::Int) {
+                const auto key = static_cast<int32_t>(value);
+                auto it = all_int_constants.find(key);
+                if (it != all_int_constants.end()) return it->second;
+                auto *c = new Constant(ty, value);
+                Values.emplace_back(c);
+                all_int_constants[key] = c;
+                return c;
+            } else {
+                auto it = all_long_constants.find(value);
+                if (it != all_long_constants.end()) return it->second;
+                auto *c = new Constant(ty, value);
+                Values.emplace_back(c);
+                all_long_constants[value] = c;
+                return c;
+            }
         }
 
-        std::vector<Int *> getAllIntegerConstants() const {
-            std::vector<Int *> result;
-            for (const auto &[Keys, Value]: all_integer_values) {
-                result.emplace_back(Value);
-            }
+        std::vector<Constant *> getAllConstants() const {
+            std::vector<Constant *> result;
+            for (const auto &[_, c] : all_int_constants)  result.emplace_back(c);
+            for (const auto &[_, c] : all_long_constants) result.emplace_back(c);
             return result;
         }
 
-        Reg *createReg() {
-            auto *RegVal = new Reg(NextRegID++);
+        Reg *createReg(Type* ty) {
+            auto *RegVal = new Reg(NextRegID++, ty);
             Values.emplace_back(RegVal);
             return RegVal;
         }
 
-        VarOp *getOrCreateVar(const StringRef Name) {
+        VarOp *getOrCreateVar(StringRef Name, Type* ty) {
             if (Variables.contains(Name)) {
                 return Variables[Name];
             }
-            auto *newVar = new VarOp(Name);
+            auto *newVar = new VarOp(Name, ty);
             Values.emplace_back(newVar);
             Variables[Name] = newVar;
             return newVar;
         }
 
-        StaticVarOp *getOrCreateStaticVar(const StringRef Name) {
+        StaticVarOp *getOrCreateStaticVar(StringRef Name, Type* ty) {
             if (StaticVars.contains(Name)) {
                 return StaticVars[Name];
             }
-            auto *newVar = new StaticVarOp(Name);
+            auto *newVar = new StaticVarOp(Name, ty);
             Values.emplace_back(newVar);
             StaticVars[Name] = newVar;
             return newVar;
@@ -1046,31 +1120,45 @@ namespace mycc::ir {
         }
 
         UnaryOp *createUnaryOp(Operand *src, const UnaryOp::UnaryOpKind kind) {
-            Reg *dst = createReg(); // Generate temporal register for destination
+            Reg *dst = createReg(src->getType());
             auto *UnaryInst = new UnaryOp(dst, src, kind);
             Values.emplace_back(UnaryInst);
             return UnaryInst;
         }
 
         BinaryOp *createBinaryOp(Operand *left, Operand *right, const BinaryOp::BinaryOpKind kind) {
-            Reg *dst = createReg(); // Generate temporal register for destination
+            Reg *dst = createReg(left->getType());
             auto *BinaryInst = new BinaryOp(dst, left, right, kind);
             Values.emplace_back(BinaryInst);
             return BinaryInst;
         }
 
-        ICmpOp *createICmpOp(Operand *left, Operand *right, const ICmpOp::CmpOpKind kind) {
-            Reg *dst = createReg();
+        ICmpOp *createICmpOp(Operand *left, Operand *right, const ICmpOp::CmpOpKind kind, Type* resultTy) {
+            Reg *dst = createReg(resultTy);
             auto *cmp = new ICmpOp(dst, left, right, kind);
             Values.emplace_back(cmp);
             return cmp;
         }
 
-        Invoke *createInvoke(StringRef CalledFunction, const std::vector<Operand *> &operands) {
-            Reg *dst = createReg();
+        Invoke *createInvoke(StringRef CalledFunction, const std::vector<Operand *> &operands, Type* resultTy) {
+            Reg *dst = createReg(resultTy);
             auto invoke = new Invoke(CalledFunction, operands, dst);
             Values.emplace_back(invoke);
             return invoke;
+        }
+
+        SignExtend *createSignExtend(Value *src, Type* toType) {
+            Reg *dst = createReg(toType);
+            auto *signExtend = new SignExtend(src, dst);
+            Values.emplace_back(signExtend);
+            return signExtend;
+        }
+
+        Truncate *createTruncate(Value *src, Type* toType) {
+            Reg *dst = createReg(toType);
+            auto *truncate = new Truncate(src, dst);
+            Values.emplace_back(truncate);
+            return truncate;
         }
 
         // All Values are automatically cleaned up when Context is destroyed

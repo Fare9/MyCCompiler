@@ -397,6 +397,7 @@ bool Sema::actOnVarDeclarationInit(VarDeclaration *decl, Expr *initExpr) {
             // No initializer - defaults to 0
             initialValue = InitialValue::Initial;
             constantValue = 0;
+            initExpr = actOnStaticInit(decl->getType(), 0);
         }
 
         // Update the symbol entry with the actual initial value
@@ -521,14 +522,23 @@ VarDeclaration *Sema::actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr 
 
         // Return the existing variable declaration (don't create a new one)
         VarDeclaration *existingDecl = CurrentScope->lookupForVar(Name);
-        if (existingDecl && initExpr != nullptr && existingDecl->getExpr() == nullptr) {
-            // Update the existing declaration with the new initializer
-            existingDecl->setExpr(initExpr);
+        if (existingDecl && existingDecl->getExpr() == nullptr) {
+            if (initExpr != nullptr) {
+                // Update with the explicit initializer from this declaration
+                existingDecl->setExpr(initExpr);
+            } else if (initialValue != InitialValue::NoInitializer) {
+                // Tentative definition: ensure zero initializer is present
+                existingDecl->setExpr(actOnStaticInit(type, 0));
+            }
         }
         return existingDecl;
     }
 
     // Step 7: Create new declaration and add to symbol table
+    // Ensure tentative definitions always carry a zero initializer
+    if (initExpr == nullptr && initialValue != InitialValue::NoInitializer)
+        initExpr = actOnStaticInit(type, 0);
+
     auto *var = Context.createExpression<Var>(Loc, Name);
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, initExpr, storageClass);
 
@@ -591,7 +601,7 @@ void Sema::actOnLabelStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
 }
 
 void Sema::actOnGotoStatement(BlockItems &Items, SMLoc Loc, StringRef Label) {
-    gotoLabelValidator.addFunctionLabel(Label);
+    gotoLabelValidator.addGotoLabel(Label);
     Items.emplace_back(Context.createStatement<GotoStatement>(Label));
 }
 
@@ -660,6 +670,8 @@ UnaryOperator *Sema::actOnUnaryOperator(SMLoc Loc, UnaryOperator::UnaryOperatorK
 BinaryOperator *Sema::actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) {
     auto *common = typeExpressionInference->commonType(typeExpressionInference->getType(left, CurrentScope),
                                                        typeExpressionInference->getType(right, CurrentScope));
+    if (shouldError(!common, [&] { Diags.report(Loc, diag::err_non_compatible_types); }))
+        return nullptr;
     left = coerce(Loc, left, common);
     right = coerce(Loc, right, common);
     auto *bop = Context.createExpression<BinaryOperator>(Loc, Kind, left, right);
@@ -671,9 +683,9 @@ AssignmentOperator *Sema::actOnAssignment(SMLoc Loc, Expr *left, Expr *right) {
     if (shouldError(left->getKind() != Expr::Ek_Var,
                     [&] { Diags.report(Loc, diag::err_incorrect_lvalue); }))
         return nullptr;
-    if (shouldError(typeExpressionInference->commonType(typeExpressionInference->getType(left, CurrentScope),
-                                                        typeExpressionInference->getType(right, CurrentScope)) ==
-                    nullptr,
+    if (shouldError(!typeExpressionInference->isAssignable(
+                        typeExpressionInference->getType(right, CurrentScope),
+                        typeExpressionInference->getType(left, CurrentScope)),
                     [&] { Diags.report(Loc, diag::err_non_compatible_types); }))
         return nullptr;
     right = coerce(Loc, right, left->getType());
@@ -776,7 +788,7 @@ FunctionCallExpr *Sema::actOnFunctionCallOperator(SMLoc Loc, StringRef name, Exp
             auto *paramType = paramTypes[i];
             auto *argProvided = args[i];
             auto *argProvidedType = typeExpressionInference->getType(argProvided, CurrentScope);
-            if (shouldError(!typeExpressionInference->commonType(paramType, argProvidedType),
+            if (shouldError(!typeExpressionInference->isAssignable(argProvidedType, paramType),
                             [&] { Diags.report(Loc, diag::err_non_compatible_types); }))
                 return nullptr;
             argCorrectTypes.push_back(coerce(Loc, argProvided, paramType));

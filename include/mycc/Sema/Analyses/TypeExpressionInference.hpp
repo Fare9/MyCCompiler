@@ -11,7 +11,14 @@ public:
     explicit TypeExpressionInference(ASTContext& Context) : Context(Context) {
     }
 
-    Type* commonType(Type*, Type*) const;
+    /// Usual arithmetic conversions — the common type for a binary expression.
+    /// Returns nullptr if the types are not arithmetically compatible.
+    Type* commonType(Type* lhs, Type* rhs) const;
+
+    /// Returns true if a value of type `from` can be assigned/passed into
+    /// a slot of type `to`. For builtins this means same kind or a
+    /// widening/narrowing integer conversion. Extend here for pointers.
+    bool isAssignable(Type* from, Type* to) const;
 
     Type* getType(Expr*, Scope*);
     Type* getType(IntegerLiteral*, Scope*);
