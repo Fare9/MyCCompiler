@@ -265,8 +265,10 @@ bool Sema::actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
     }
 
     auto *var = Context.createExpression<Var>(Loc, Name);
+    var->setType(type);
     auto *decl = Context.createDeclaration<VarDeclaration>(Loc, var, nullptr, storageClass);
     decl->setType(type);
+
 
     if (storageClass == StorageClass::SC_Extern) {
         // extern local variable

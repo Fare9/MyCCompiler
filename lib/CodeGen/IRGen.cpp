@@ -271,7 +271,7 @@ void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *
         auto *result = generateExpression(*right, IRFunc);
 
         // Create IR variable with the unique name and type
-        auto *varop = Ctx.getOrCreateVar(uniqueName, lowerType(left->getType()));
+        auto *varop = Ctx.getOrCreateVar(uniqueName, lowerType(Decl.getType()));
         IRFunc->add_instruction(Ctx.createCopy(result, varop));
     }
 }
@@ -570,15 +570,23 @@ ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFu
     if (irName == originalName.str()) {
         // Check if it's a known extern variable (defined in another translation unit)
         if (ExternVariables.count(irName)) {
-            return Ctx.getOrCreateStaticVar(originalName, lowerType(var.getType()));
+            // Look up type from symbol table entry (Var node type may be null)
+            if (Symbols) {
+                if (const SymbolEntry *entry = Symbols->lookupEntry(originalName)) {
+                    auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                    return Ctx.getOrCreateStaticVar(originalName, lowerType(varDecl->getType()));
+                }
+            }
+            return Ctx.getOrCreateStaticVar(originalName, Ctx.getInt32Ty());
         }
 
         // Check for file-scope static variable (stored with original name)
         if (Symbols) {
             if (const SymbolEntry *entry = Symbols->lookupEntry(originalName)) {
                 if (entry->isStaticAttr()) {
-                    // File-scope static - use original name
-                    return Ctx.getOrCreateStaticVar(originalName, lowerType(var.getType()));
+                    // File-scope static - use original name, get type from declaration
+                    auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                    return Ctx.getOrCreateStaticVar(originalName, lowerType(varDecl->getType()));
                 }
             }
         }
@@ -589,14 +597,18 @@ ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFu
     if (Symbols) {
         if (const SymbolEntry *entry = Symbols->lookupEntry(irName)) {
             if (entry->isStaticAttr()) {
-                // Static local - use the unique name from rename stack
-                return Ctx.getOrCreateStaticVar(irName, lowerType(var.getType()));
+                // Static local - use the unique name from rename stack, type from declaration
+                auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                return Ctx.getOrCreateStaticVar(irName, lowerType(varDecl->getType()));
             }
         }
     }
 
-    // Local variable - use renamed name from the stack
-    return Ctx.getOrCreateVar(irName, lowerType(var.getType()));
+    // Local variable - use renamed name from the stack.
+    // getOrCreateVar returns the existing VarOp if already registered by generateDeclaration,
+    // so the type fallback here is only used if the variable was somehow never declared.
+    ir::Type* ty = var.getType() ? lowerType(var.getType()) : Ctx.getInt32Ty();
+    return Ctx.getOrCreateVar(irName, ty);
 }
 
 ir::Value *IRGenerator::generateAssignmentExpression(const AssignmentOperator &assignment, ir::Function *IRFunc) {
@@ -827,7 +839,10 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
 
 ir::Value *IRGenerator::generatePrefixExpression(const PrefixOperator &PrefixOp, ir::Function *IRFunc) {
     ir::Value *var = generateExpression(*PrefixOp.getExpr(), IRFunc);
-    auto *one = Ctx.createConstant(lowerType(PrefixOp.getType()), 1);
+    // Get type from the operand (which was already typed by generateVarExpression/etc.)
+    auto *varOp = dynamic_cast<ir::Operand *>(var);
+    ir::Type* ty = (varOp && varOp->getType()) ? varOp->getType() : Ctx.getInt32Ty();
+    auto *one = Ctx.createConstant(ty, 1);
 
     ir::BinaryOp *increment_instruction = nullptr;
 
@@ -854,10 +869,13 @@ ir::Value *IRGenerator::generatePrefixExpression(const PrefixOperator &PrefixOp,
 
 ir::Value *IRGenerator::generatePostfixExpression(const PostfixOperator &PostfixOp, ir::Function *IRFunc) {
     ir::Value *var = generateExpression(*PostfixOp.getExpr(), IRFunc);
-    auto *one = Ctx.createConstant(lowerType(PostfixOp.getType()), 1);
+    // Get type from the operand (which was already typed by generateVarExpression/etc.)
+    auto *varOp = dynamic_cast<ir::Operand *>(var);
+    ir::Type* ty = (varOp && varOp->getType()) ? varOp->getType() : Ctx.getInt32Ty();
+    auto *one = Ctx.createConstant(ty, 1);
 
     // For postfix operators, we save the old value, update the variable, then return the old value
-    auto *old_value = Ctx.createReg(lowerType(PostfixOp.getType()));
+    auto *old_value = Ctx.createReg(ty);
     ir::BinaryOp *increment_instruction = nullptr;
 
     if (IRFunc != nullptr) {
@@ -889,8 +907,9 @@ ir::Value *IRGenerator::generateConditionalExpression(const ConditionalExpr &con
     // labels
     auto *e2_label = Ctx.getOrCreateLabel("e2_label");
     auto *end_label = Ctx.getOrCreateLabel("end_label");
-    // Result register carries the expression's type
-    auto *Result = Ctx.createReg(lowerType(cond_expr.getType()));
+    // Result register carries the expression's type (fall back to i32 if not inferred yet)
+    ir::Type* condTy = cond_expr.getType() ? lowerType(cond_expr.getType()) : Ctx.getInt32Ty();
+    auto *Result = Ctx.createReg(condTy);
 
     // first generate the conditional statement
     auto *cond_result = generateExpression(*cond_expr.getCondition(), IRFunc);
@@ -914,7 +933,8 @@ ir::Value *IRGenerator::generateFunctionCallExpression(const FunctionCallExpr &F
     for (auto *arg: FuncCallExpr.getArgs()) {
         params.emplace_back(reinterpret_cast<ir::Operand *>(generateExpression(*arg, IRFunc)));
     }
-    auto *invoke = Ctx.createInvoke(FuncCallExpr.getIdentifier(), params, lowerType(FuncCallExpr.getType()));
+    ir::Type* retTy = FuncCallExpr.getType() ? lowerType(FuncCallExpr.getType()) : Ctx.getInt32Ty();
+    auto *invoke = Ctx.createInvoke(FuncCallExpr.getIdentifier(), params, retTy);
     IRFunc->add_instruction(invoke);
     return invoke->getResult();
 }
