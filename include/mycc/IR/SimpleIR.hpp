@@ -5,6 +5,7 @@
 #include "llvm/ADT/StringMap.h"
 
 #include <cassert>
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -54,6 +55,8 @@ public:
     [[nodiscard]] std::string to_string() const override {
         return "i" + std::to_string(BitWidth);
     }
+
+    static bool classof(const Type *T) { return T->getKind() == TK_Int; }
 };
 
 /**
@@ -63,6 +66,8 @@ class VoidType : public Type {
 public:
     VoidType() : Type(TK_Void) {}
     [[nodiscard]] std::string to_string() const override { return "void"; }
+
+    static bool classof(const Type *T) { return T->getKind() == TK_Void; }
 };
 
 /**
@@ -88,6 +93,8 @@ public:
         }
         return s + ")";
     }
+
+    static bool classof(const Type *T) { return T->getKind() == TK_Function; }
 };
 
 // ============================================================
@@ -220,26 +227,26 @@ public:
 
 class VarOp : public Operand {
     std::string Name;
-    ir::Type* Ty;
+    Type* Ty;
 
 public:
-    explicit VarOp(StringRef Name, ir::Type* Ty) : Name(Name), Ty(Ty) {}
+    explicit VarOp(const StringRef Name, Type* Ty) : Name(Name), Ty(Ty) {}
 
     [[nodiscard]] std::string getName() const { return Name; }
-    [[nodiscard]] ir::Type* getType() const override { return Ty; }
+    [[nodiscard]] Type* getType() const override { return Ty; }
 
     [[nodiscard]] std::string to_string() const override { return "%" + Name; }
 };
 
 class ParameterOp : public Operand {
     std::string Name;
-    ir::Type* Ty;
+    Type* Ty;
 
 public:
     explicit ParameterOp(StringRef Name, ir::Type* Ty) : Name(Name), Ty(Ty) {}
 
     [[nodiscard]] std::string getName() const { return Name; }
-    [[nodiscard]] ir::Type* getType() const override { return Ty; }
+    [[nodiscard]] Type* getType() const override { return Ty; }
 
     [[nodiscard]] std::string to_string() const override { return "%" + Name; }
 };
@@ -460,7 +467,7 @@ public:
     void setRight(Operand *right) {
         if (getNumOperands() == 1) addOperand(right); else setOperand(1, right);
     }
-    void setKind(CmpOpKind K) { Kind = K; }
+    void setKind(const CmpOpKind K) { Kind = K; }
     [[nodiscard]] Reg *getDestination() const { return Dst; }
     [[nodiscard]] Value *getLeft() const { return getOperand(0); }
     [[nodiscard]] Value *getRight() const { return getOperand(1); }
@@ -476,7 +483,7 @@ public:
 
     [[nodiscard]] std::string to_string() const override {
         // Use the left operand's type — both sides must be the same type for a comparison
-        const std::string ty = static_cast<Operand *>(getOperand(0))->getType()->to_string();
+        const std::string ty = dynamic_cast<Operand *>(getOperand(0))->getType()->to_string();
         return Dst->to_string() + " = icmp " + getOpcodeName().str() + " " +
                ty + " " + getLeft()->to_string() + ", " + getRight()->to_string();
     }
@@ -488,9 +495,9 @@ class Invoke : public Instruction {
 
 public:
     Invoke() = default;
-    explicit Invoke(StringRef CalledFunction) : CalledFunction(CalledFunction) {}
+    explicit Invoke(const StringRef CalledFunction) : CalledFunction(CalledFunction) {}
 
-    Invoke(StringRef CalledFunction, const std::vector<Operand *> &operands, Reg *result)
+    Invoke(const StringRef CalledFunction, const std::vector<Operand *> &operands, Reg *result)
         : CalledFunction(CalledFunction), result(result) {
         for (Operand *operand: operands) addOperand(operand);
     }
@@ -509,7 +516,7 @@ public:
         s += getCalledFunction().str() + "(";
         for (size_t i = 0; i < getNumOperands(); ++i) {
             if (i > 0) s += ", ";
-            auto *op = static_cast<Operand *>(getOperand(i));
+            const auto *op = dynamic_cast<Operand *>(getOperand(i));
             s += op->getType()->to_string() + " " + op->to_string();
         }
         return s + ")";
@@ -523,7 +530,7 @@ public:
     SignExtend() = default;
     SignExtend(Operand *Src, Reg *Result) : Result(Result) { addOperand(Src); }
 
-    [[nodiscard]] Operand *getSource() const { return static_cast<Operand *>(getOperand(0)); }
+    [[nodiscard]] Operand *getSource() const { return dynamic_cast<Operand *>(getOperand(0)); }
     [[nodiscard]] Reg *getResult() const { return Result; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "sext"; }
     [[nodiscard]] std::string to_string() const override {
@@ -540,7 +547,7 @@ public:
     Truncate() = default;
     Truncate(Operand *source, Reg *Result) : Result(Result) { addOperand(source); }
 
-    [[nodiscard]] Operand *getSource() const { return static_cast<Operand *>(getOperand(0)); }
+    [[nodiscard]] Operand *getSource() const { return dynamic_cast<Operand *>(getOperand(0)); }
     [[nodiscard]] Reg *getResult() const { return Result; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "trunc"; }
     [[nodiscard]] std::string to_string() const override {
@@ -558,16 +565,16 @@ class StaticVariable {
     std::string Identifier;
     bool Global;
     int64_t InitValue;
-    ir::Type* Ty;
+    Type* Ty;
 
 public:
-    StaticVariable(StringRef Identifier, bool Global, ir::Type* ty, int64_t initValue)
+    StaticVariable(StringRef Identifier, bool Global, Type* ty, int64_t initValue)
         : Identifier(Identifier), Global(Global), InitValue(initValue), Ty(ty) {}
 
     [[nodiscard]] std::string getName() const { return Identifier; }
     [[nodiscard]] bool isGlobal() const { return Global; }
     [[nodiscard]] int64_t getInitialValue() const { return InitValue; }
-    [[nodiscard]] ir::Type* getType() const { return Ty; }
+    [[nodiscard]] Type* getType() const { return Ty; }
 
     [[nodiscard]] std::string to_string() const {
         std::string result = "@" + Identifier + " = ";
@@ -586,13 +593,13 @@ class Function {
     StringRef Name;
     Args args;
     bool global = true;
-    ir::FunctionType* FuncTy = nullptr;
+    FunctionType* FuncTy = nullptr;
 
 public:
     Function() = default;
 
     Function(InstList &Instructions, StringRef Name, Args &args, bool global,
-             ir::FunctionType* funcTy = nullptr)
+             FunctionType* funcTy = nullptr)
         : Instructions(std::move(Instructions)), Name(Name), args(std::move(args)),
           global(global), FuncTy(funcTy) {}
 
@@ -600,8 +607,8 @@ public:
     [[nodiscard]] size_t size() const { return Instructions.size(); }
     [[nodiscard]] bool isGlobal() const { return global; }
     [[nodiscard]] bool empty() const { return Instructions.empty(); }
-    [[nodiscard]] ir::FunctionType* getFunctionType() const { return FuncTy; }
-    void setFunctionType(ir::FunctionType* ty) { FuncTy = ty; }
+    [[nodiscard]] FunctionType* getFunctionType() const { return FuncTy; }
+    void setFunctionType(FunctionType* ty) { FuncTy = ty; }
 
     void add_instruction(Instruction *I) { Instructions.push_back(I); }
 
@@ -643,7 +650,7 @@ class Program {
 
 public:
     Program() : Ctx(std::make_unique<Context>()) {}
-    explicit Program(StringRef Name) : Name(Name), Ctx(std::make_unique<Context>()) {}
+    explicit Program(const StringRef Name) : Name(Name), Ctx(std::make_unique<Context>()) {}
 
     ~Program() {
         for (const auto &F: Funcs) delete F;
@@ -685,7 +692,7 @@ class Context {
     // --- Type storage (interned) ---
     std::unordered_map<unsigned, std::unique_ptr<IntType>> IntTypes;
     std::unique_ptr<VoidType> VoidTy;
-    std::vector<std::unique_ptr<FunctionType>> FuncTypes;
+    std::deque<std::unique_ptr<FunctionType>> FuncTypes;
 
     // --- Operand/instruction storage ---
     StringMap<VarOp *> Variables;
@@ -693,7 +700,7 @@ class Context {
     std::unordered_map<std::string, Label *> Labels;
     std::unordered_map<int32_t, Constant *> all_int_constants;
     std::unordered_map<int64_t, Constant *> all_long_constants;
-    std::vector<std::unique_ptr<Value>> Values;
+    std::deque<std::unique_ptr<Value>> Values;
     unsigned NextRegID = 0;
     unsigned LabelNextID = 0;
 
@@ -758,9 +765,9 @@ public:
         return jnz;
     }
 
-    Constant *createConstant(ir::Type* ty, int64_t value) {
+    Constant *createConstant(Type* ty, const int64_t value) {
         assert(ty->getKind() == Type::TK_Int && "createConstant requires IntType");
-        auto* intTy = static_cast<IntType*>(ty);
+        const auto* intTy = llvm::cast<IntType>(ty);
         if (intTy->getBitWidth() <= 32) {
             const auto key = static_cast<int32_t>(value);
             auto it = all_int_constants.find(key);
@@ -786,13 +793,13 @@ public:
         return result;
     }
 
-    Reg *createReg(ir::Type* ty) {
+    Reg *createReg(Type* ty) {
         auto *RegVal = new Reg(NextRegID++, ty);
         Values.emplace_back(RegVal);
         return RegVal;
     }
 
-    VarOp *getOrCreateVar(StringRef Name, ir::Type* ty) {
+    VarOp *getOrCreateVar(const StringRef Name, Type* ty) {
         if (Variables.contains(Name)) return Variables[Name];
         auto *newVar = new VarOp(Name, ty);
         Values.emplace_back(newVar);
@@ -800,7 +807,7 @@ public:
         return newVar;
     }
 
-    StaticVarOp *getOrCreateStaticVar(StringRef Name, ir::Type* ty) {
+    StaticVarOp *getOrCreateStaticVar(const StringRef Name, ir::Type* ty) {
         if (StaticVars.contains(Name)) return StaticVars[Name];
         auto *newVar = new StaticVarOp(Name, ty);
         Values.emplace_back(newVar);
@@ -840,28 +847,28 @@ public:
         return BinaryInst;
     }
 
-    ICmpOp *createICmpOp(Operand *left, Operand *right, ICmpOp::CmpOpKind kind, ir::Type* resultTy) {
+    ICmpOp *createICmpOp(Operand *left, Operand *right, ICmpOp::CmpOpKind kind, Type* resultTy) {
         Reg *dst = createReg(resultTy);
         auto *cmp = new ICmpOp(dst, left, right, kind);
         Values.emplace_back(cmp);
         return cmp;
     }
 
-    Invoke *createInvoke(StringRef CalledFunction, const std::vector<Operand *> &operands, ir::Type* resultTy) {
+    Invoke *createInvoke(const StringRef CalledFunction, const std::vector<Operand *> &operands, Type* resultTy) {
         Reg *dst = createReg(resultTy);
         auto *invoke = new Invoke(CalledFunction, operands, dst);
         Values.emplace_back(invoke);
         return invoke;
     }
 
-    SignExtend *createSignExtend(Operand *src, ir::Type* toType) {
+    SignExtend *createSignExtend(Operand *src, Type* toType) {
         Reg *dst = createReg(toType);
         auto *signExtend = new SignExtend(src, dst);
         Values.emplace_back(signExtend);
         return signExtend;
     }
 
-    Truncate *createTruncate(Operand *src, ir::Type* toType) {
+    Truncate *createTruncate(Operand *src, Type* toType) {
         Reg *dst = createReg(toType);
         auto *truncate = new Truncate(src, dst);
         Values.emplace_back(truncate);
