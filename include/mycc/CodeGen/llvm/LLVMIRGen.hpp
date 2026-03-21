@@ -88,6 +88,8 @@ private:
     llvm::Value *generatePostfixExpr(const PostfixOperator &Op);
     llvm::Value *generateConditionalExpr(const ConditionalExpr &Op);
     llvm::Value *generateFunctionCallExpr(const FunctionCallExpr &Call);
+    llvm::Value *generateCastExpr(const CastExpr &Cast);
+
 
     // Short-circuit helpers
     llvm::Value *generateLogicalAnd(const BinaryOperator &Op);

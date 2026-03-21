@@ -27,13 +27,17 @@ void LLVMIRGenerator::generateGlobals(const Scope &symbols) {
     for (const auto &[Name, Decl] : symbols.getSymbols()) {
         if (Decl.isFunction()) {
             auto &Func = *std::get<FunctionDeclaration *>(Decl.decl);
-            std::vector<llvm::Type*> ParamTypes(Func.getArgs().size(), llvm::Type::getInt32Ty(Ctx));
-            auto *RetType = llvm::Type::getInt32Ty(Ctx);
+            const auto &FuncArgs = Func.getArgs();
+            std::vector<llvm::Type*> ParamTypes(FuncArgs.size());
+            for (const auto Arg : FuncArgs) {
+                ParamTypes.emplace_back(getLLVMType(Arg->getType()));
+            }
+            auto *RetType = getLLVMType(Func.getFunctionType()->getReturnType());
             auto *FnTy = llvm::FunctionType::get(RetType, ParamTypes, false);
             auto *LLVMFunc = llvm::Function::Create(FnTy, getLinkage(Decl), Func.getName(), Module.get());
             unsigned i = 0;
             for (auto &Arg : LLVMFunc->args())
-                Arg.setName(Func.getArgs()[i++]->getName());
+                Arg.setName(FuncArgs[i++]->getName());
         } else {
             generateGlobalVar(*std::get<VarDeclaration *>(Decl.decl), Decl);
         }
@@ -773,6 +777,8 @@ llvm::Value *LLVMIRGenerator::generateFunctionCallExpr(const FunctionCallExpr &C
 llvm::Type *generateBuiltInType(const mycc::BuiltinType* T, llvm::LLVMContext& Ctx) {
     if (T->getBuiltinKind() == mycc::BuiltinType::Int)
         return llvm::Type::getInt32Ty(Ctx);
+    if (T->getBuiltinKind() == mycc::BuiltinType::Long)
+        return llvm::Type::getInt64Ty(Ctx);
     if (T->getBuiltinKind() == mycc::BuiltinType::Void)
         return llvm::Type::getVoidTy(Ctx);
     return nullptr;
