@@ -4,6 +4,38 @@
 
 using namespace mycc::codegen::llvmbackend;
 
+namespace {
+
+/// @brief Extract a compile-time integer constant from a static initializer
+/// expression, using the declared variable type. Handles Int/Long literals
+/// and IntInit/LongInit nodes.
+llvm::Constant *getStaticInitConstant(const mycc::Expr &E, llvm::Type *Ty) {
+    switch (E.getKind()) {
+        case mycc::Expr::Ek_Int:
+            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::IntegerLiteral>(E).getValue().getExtValue());
+        case mycc::Expr::Ek_Long:
+            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::LongLiteral>(E).getValue().getExtValue());
+        case mycc::Expr::Ek_IntInit:
+            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::IntInit>(E).getValue());
+        case mycc::Expr::Ek_LongInit:
+            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::LongInit>(E).getValue());
+        default:
+            llvm_unreachable("Non-constant static initializer expression");
+    }
+}
+
+llvm::Type *generateBuiltInType(const mycc::BuiltinType *T, llvm::LLVMContext &Ctx) {
+    if (T->getBuiltinKind() == mycc::BuiltinType::Int)
+        return llvm::Type::getInt32Ty(Ctx);
+    if (T->getBuiltinKind() == mycc::BuiltinType::Long)
+        return llvm::Type::getInt64Ty(Ctx);
+    if (T->getBuiltinKind() == mycc::BuiltinType::Void)
+        return llvm::Type::getVoidTy(Ctx);
+    return nullptr;
+}
+
+} // namespace
+
 LLVMIRGenerator::LLVMIRGenerator(llvm::LLVMContext &Ctx, llvm::StringRef ModuleName) :
     Ctx(Ctx),
     Module(std::make_unique<llvm::Module>(ModuleName, Ctx)),
@@ -28,7 +60,7 @@ void LLVMIRGenerator::generateGlobals(const Scope &symbols) {
         if (Decl.isFunction()) {
             auto &Func = *std::get<FunctionDeclaration *>(Decl.decl);
             const auto &FuncArgs = Func.getArgs();
-            std::vector<llvm::Type*> ParamTypes(FuncArgs.size());
+            std::vector<llvm::Type*> ParamTypes{};
             for (const auto Arg : FuncArgs) {
                 ParamTypes.emplace_back(getLLVMType(Arg->getType()));
             }
@@ -93,7 +125,7 @@ void LLVMIRGenerator::generateGlobalVar(const VarDeclaration &Var, const SymbolE
     auto linkage = getLinkage(Entry);
     // We now only support `int` but we will expand it with a type
     // in the variable
-    auto *Ty = llvm::Type::getInt32Ty(Ctx);
+    auto *Ty = getLLVMType(Var.getType());
 
     // We need an optional constant value. It will be 0 if the
     // initial value is tentative, or we can have another value
@@ -183,7 +215,6 @@ void LLVMIRGenerator::generateStatement(const Statement &Stmt) {
             break;
         }
         case Statement::SK_Null:
-            break;
         case Statement::SK_Case:
         case Statement::SK_Default:
             // Handled by generateSwitchStmt
@@ -438,7 +469,7 @@ void LLVMIRGenerator::generateSwitchStmt(const SwitchStatement &Stmt) {
     }
 
     // Pass 2: emit the body, setting insert point when we hit case/default
-    for (size_t i = 0; i < Items.size(); i++) {
+    for (size_t i = 0, e = Items.size(); i < e; i++) {
         // If this index has a case/default block, transition to it
         // we just need to set the block as the new insertion point
         auto it = BlockForIndex.find(i);
@@ -475,16 +506,14 @@ void LLVMIRGenerator::generateDeclaration(const VarDeclaration &Decl) {
 
     // Static locals become global variables with internal linkage
     if (storageClass.has_value() && *storageClass == StorageClass::SC_Static) {
-        auto *Ty = llvm::Type::getInt32Ty(Ctx);
+        auto *Ty = getLLVMType(Decl.getType());
         // Use the unique name (e.g. "func.x.1") to avoid collisions
         auto GlobalName = Decl.getUniqueName().value_or(Decl.getVar()->getName().str());
 
         // Static local initializers must be compile-time constants
         llvm::Constant *Init = llvm::ConstantInt::get(Ty, 0);
-        if (Decl.getExpr()) {
-            auto &InitVal = dynamic_cast<const IntegerLiteral &>(*Decl.getExpr());
-            Init = llvm::ConstantInt::get(Ty, InitVal.getValue());
-        }
+        if (Decl.getExpr())
+            Init = getStaticInitConstant(*Decl.getExpr(), Ty);
 
         auto *GV = new llvm::GlobalVariable(
             *Module, Ty, false,
@@ -497,11 +526,20 @@ void LLVMIRGenerator::generateDeclaration(const VarDeclaration &Decl) {
 
     // allocate space for the variable
     auto *Func = Builder.GetInsertBlock()->getParent();
-    auto *Alloca = createEntryBlockAlloca(Func, Decl.getVar()->getName(), llvm::Type::getInt32Ty(Ctx));
+    auto *Alloca = createEntryBlockAlloca(Func, Decl.getVar()->getName(), getLLVMType(Decl.getType()));
     NamedValues[Decl.getVar()->getName()] = Alloca;
 
     if (Decl.getExpr() != nullptr) {
         auto *Expr = generateExpression(*Decl.getExpr());
+        auto *AllocaTy = Alloca->getAllocatedType();
+        if (Expr->getType() != AllocaTy) {
+            unsigned SrcBits = Expr->getType()->getIntegerBitWidth();
+            unsigned DstBits = AllocaTy->getIntegerBitWidth();
+            if (SrcBits < DstBits)
+                Expr = Builder.CreateSExt(Expr, AllocaTy);
+            else
+                Expr = Builder.CreateTrunc(Expr, AllocaTy);
+        }
         Builder.CreateStore(Expr, Alloca);
     }
 }
@@ -509,7 +547,10 @@ void LLVMIRGenerator::generateDeclaration(const VarDeclaration &Decl) {
 llvm::Value *LLVMIRGenerator::generateExpression(const Expr &E) {
     switch (E.getKind()) {
         case Expr::Ek_Int:
-            return generateIntLiteral(dynamic_cast<const IntegerLiteral &>(E));
+        case Expr::Ek_Long:
+        case Expr::Ek_IntInit:
+        case Expr::Ek_LongInit:
+            return generateConstantExpression(E);
         case Expr::Ek_Var:
             return generateVarExpr(dynamic_cast<const Var &>(E));
         case Expr::Ek_UnaryOperator:
@@ -526,19 +567,34 @@ llvm::Value *LLVMIRGenerator::generateExpression(const Expr &E) {
             return generateConditionalExpr(dynamic_cast<const ConditionalExpr &>(E));
         case Expr::Ek_FunctionCallOperator:
             return generateFunctionCallExpr(dynamic_cast<const FunctionCallExpr &>(E));
+        case Expr::Ek_Cast:
+            return generateCastExpr(dynamic_cast<const CastExpr &>(E));
     }
     llvm_unreachable("Unknown expression kind");
 }
 
-llvm::Value *LLVMIRGenerator::generateIntLiteral(const IntegerLiteral &Lit) const {
-    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), Lit.getValue().getSExtValue());
+llvm::Value *LLVMIRGenerator::generateConstantExpression(const Expr &Lit) const {
+    switch (Lit.getKind()) {
+        case Expr::Ek_Int:
+            return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), llvm::cast<IntegerLiteral>(Lit).getValue());
+        case Expr::Ek_Long:
+            return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), llvm::cast<LongLiteral>(Lit).getValue());
+        case Expr::Ek_IntInit:
+            return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), llvm::cast<IntInit>(Lit).getValue());
+        case Expr::Ek_LongInit:
+            return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), llvm::cast<LongInit>(Lit).getValue());
+        default:
+            llvm_unreachable("Unknown expression kind");
+    }
 }
 
 llvm::Value *LLVMIRGenerator::generateVarExpr(const Var &V) {
     // retrieve the address of that variable
     auto *Addr = getVarAddress(V);
+    // Type of the Var Expr
+    auto *Type = getLLVMType(V.getType());
     // load its value from the address
-    return Builder.CreateLoad(llvm::Type::getInt32Ty(Ctx), Addr);
+    return Builder.CreateLoad(Type, Addr);
 }
 
 llvm::Value *LLVMIRGenerator::generateUnaryExpr(const UnaryOperator &Op) {
@@ -554,7 +610,7 @@ llvm::Value *LLVMIRGenerator::generateUnaryExpr(const UnaryOperator &Op) {
             break;
         case UnaryOperator::UopK_Not:
             auto *Cmp = Builder.CreateICmpEQ(Expr, llvm::ConstantInt::get(Expr->getType(), 0));
-            NewValue = Builder.CreateZExt(Cmp, llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Cmp, Expr->getType());
             break;
     }
 
@@ -616,6 +672,7 @@ llvm::Value *LLVMIRGenerator::generateBinaryExpr(const BinaryOperator &Op) {
 
     auto *LHS = generateExpression(*Op.getLeft());
     auto *RHS = generateExpression(*Op.getRight());
+    auto *type = getLLVMType(Op.getType());
 
     llvm::Value *NewValue = nullptr;
     switch (Op.getOperatorKind()) {
@@ -650,22 +707,22 @@ llvm::Value *LLVMIRGenerator::generateBinaryExpr(const BinaryOperator &Op) {
             NewValue = Builder.CreateOr(LHS, RHS);
             break;
         case BinaryOperator::BoK_LowerThan:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpSLT(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpSLT(LHS, RHS), type);
             break;
         case BinaryOperator::BoK_LowerEqual:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpSLE(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpSLE(LHS, RHS), type);
             break;
         case BinaryOperator::BoK_GreaterThan:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpSGT(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpSGT(LHS, RHS), type);
             break;
         case BinaryOperator::BoK_GreaterEqual:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpSGE(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpSGE(LHS, RHS), type);
             break;
         case BinaryOperator::Bok_Equal:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpEQ(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpEQ(LHS, RHS), type);
             break;
         case BinaryOperator::Bok_NotEqual:
-            NewValue = Builder.CreateZExt(Builder.CreateICmpNE(LHS, RHS), llvm::Type::getInt32Ty(Ctx));
+            NewValue = Builder.CreateZExt(Builder.CreateICmpNE(LHS, RHS), type);
             break;
         default:
             llvm_unreachable("Unexpected binary operator kind");
@@ -681,6 +738,15 @@ llvm::Value *LLVMIRGenerator::generateAssignmentExpr(const AssignmentOperator &O
     auto *assignedVar = dynamic_cast<const Var*>(Op.getLeft());
     auto *Addr = getVarAddress(*assignedVar);
     auto *RHS = generateExpression(*Op.getRight());
+    auto *AllocaTy = getLLVMType(assignedVar->getType());
+    if (RHS->getType() != AllocaTy) {
+        unsigned SrcBits = RHS->getType()->getIntegerBitWidth();
+        unsigned DstBits = AllocaTy->getIntegerBitWidth();
+        if (SrcBits < DstBits)
+            RHS = Builder.CreateSExt(RHS, AllocaTy);
+        else
+            RHS = Builder.CreateTrunc(RHS, AllocaTy);
+    }
     Builder.CreateStore(RHS, Addr);
     return RHS;
 }
@@ -689,16 +755,18 @@ llvm::Value *LLVMIRGenerator::generatePrefixExpr(const PrefixOperator &Op) {
     // Get address of the variable
     auto *VarExpr = dynamic_cast<const Var*>(Op.getExpr());
     auto *Addr = getVarAddress(*VarExpr);
+    auto *varType = VarExpr->getType();
+    auto *type = getLLVMType(varType);
 
-    auto *OldVal = Builder.CreateLoad(llvm::Type::getInt32Ty(Ctx), Addr);
+    auto *OldVal = Builder.CreateLoad(type, Addr);
 
     llvm::Value* NewValue;
     if (Op.getOperatorKind() == PrefixOperator::POK_PreIncrement) {
         // ++Var
-        NewValue = Builder.CreateAdd(OldVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 1));
+        NewValue = Builder.CreateAdd(OldVal, llvm::ConstantInt::get(type, 1));
     } else {
         // --Var
-        NewValue = Builder.CreateSub(OldVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 1));
+        NewValue = Builder.CreateSub(OldVal, llvm::ConstantInt::get(type, 1));
     }
     Builder.CreateStore(NewValue, Addr);
 
@@ -709,16 +777,18 @@ llvm::Value *LLVMIRGenerator::generatePostfixExpr(const PostfixOperator &Op) {
     // Get address of the variable
     auto *VarExpr = dynamic_cast<const Var*>(Op.getExpr());
     auto *Addr = getVarAddress(*VarExpr);
+    auto *varType = VarExpr->getType();
+    auto *type = getLLVMType(varType);
 
-    auto *OldVal = Builder.CreateLoad(llvm::Type::getInt32Ty(Ctx), Addr);
+    auto *OldVal = Builder.CreateLoad(type, Addr);
 
     llvm::Value* NewValue;
     if (Op.getOperatorKind() == PostfixOperator::POK_PostIncrement) {
         // Var++
-        NewValue = Builder.CreateAdd(OldVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 1));
+        NewValue = Builder.CreateAdd(OldVal, llvm::ConstantInt::get(type, 1));
     } else {
         // Var--
-        NewValue = Builder.CreateSub(OldVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 1));
+        NewValue = Builder.CreateSub(OldVal, llvm::ConstantInt::get(type, 1));
     }
 
     // Store the new value to the variable
@@ -774,14 +844,22 @@ llvm::Value *LLVMIRGenerator::generateFunctionCallExpr(const FunctionCallExpr &C
     return Builder.CreateCall(Callee, Args);
 }
 
-llvm::Type *generateBuiltInType(const mycc::BuiltinType* T, llvm::LLVMContext& Ctx) {
-    if (T->getBuiltinKind() == mycc::BuiltinType::Int)
-        return llvm::Type::getInt32Ty(Ctx);
-    if (T->getBuiltinKind() == mycc::BuiltinType::Long)
-        return llvm::Type::getInt64Ty(Ctx);
-    if (T->getBuiltinKind() == mycc::BuiltinType::Void)
-        return llvm::Type::getVoidTy(Ctx);
-    return nullptr;
+llvm::Value *LLVMIRGenerator::generateCastExpr(const CastExpr &Cast) {
+    const auto *expr = Cast.getCastedExpression();
+    auto *toCastType = Cast.getCastedType();
+
+    auto *llvm_expr = generateExpression(*expr);
+    auto *toCastLLVMType = getLLVMType(toCastType);
+
+    unsigned SrcBits = llvm_expr->getType()->getIntegerBitWidth();
+    unsigned DstBits = toCastLLVMType->getIntegerBitWidth();
+
+    if (SrcBits == DstBits)
+        return llvm_expr; // No-op cast, same type
+    else if (SrcBits < DstBits)
+        return Builder.CreateSExt(llvm_expr, toCastLLVMType);  // e.g. int -> long
+    else
+        return Builder.CreateTrunc(llvm_expr, toCastLLVMType); // e.g. long -> int
 }
 
 llvm::Type *LLVMIRGenerator::getLLVMType(const Type *T) const {
@@ -803,5 +881,8 @@ llvm::AllocaInst *LLVMIRGenerator::createEntryBlockAlloca(llvm::Function *F,
 }
 
 llvm::Value *LLVMIRGenerator::getVarAddress(const Var& V) {
-    return NamedValues[V.getName()];
+    auto it = NamedValues.find(V.getName());
+    if (it != NamedValues.end())
+        return it->second;
+    return Module->getGlobalVariable(V.getName());
 }
