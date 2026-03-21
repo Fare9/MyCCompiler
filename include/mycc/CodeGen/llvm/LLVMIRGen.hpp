@@ -79,7 +79,7 @@ private:
 
     // Expressions
     llvm::Value *generateExpression(const Expr &E);
-    [[nodiscard]] llvm::Value *generateIntLiteral(const IntegerLiteral &Lit) const;
+    [[nodiscard]] llvm::Value *generateConstantExpression(const Expr &Lit) const;
     llvm::Value *generateVarExpr(const Var &V);
     llvm::Value *generateUnaryExpr(const UnaryOperator &Op);
     llvm::Value *generateBinaryExpr(const BinaryOperator &Op);
@@ -88,6 +88,8 @@ private:
     llvm::Value *generatePostfixExpr(const PostfixOperator &Op);
     llvm::Value *generateConditionalExpr(const ConditionalExpr &Op);
     llvm::Value *generateFunctionCallExpr(const FunctionCallExpr &Call);
+    llvm::Value *generateCastExpr(const CastExpr &Cast);
+
 
     // Short-circuit helpers
     llvm::Value *generateLogicalAnd(const BinaryOperator &Op);

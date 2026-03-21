@@ -2,9 +2,7 @@
 #pragma once
 
 #include "mycc/Basic/LLVM.hpp"
-#include "llvm/Support/SourceMgr.h"
 #include <memory>
-#include <vector>
 #include <deque>
 
 namespace mycc {
@@ -16,8 +14,13 @@ class VarDeclaration;
 class FunctionDeclaration;
 class Program;
 
+/**
+ * @brief ASTContext class keeps the memory from all the possibles nodes
+ * that the AST can have. In this way, any node we have will be released once
+ * this ASTContext is destroyed.
+ */
 class ASTContext {
-    llvm::SourceMgr &SrcMgr;
+    SourceMgr &SrcMgr;
     StringRef FileName;
     
     // Storage for all AST nodes - the context owns all nodes
@@ -27,10 +30,26 @@ class ASTContext {
     std::deque<std::unique_ptr<VarDeclaration>> Declarations;
     std::deque<std::unique_ptr<FunctionDeclaration>> Functions;
     std::deque<std::unique_ptr<Program>> Programs;
+
+    // We create a pool of types, the ASTContext keeps the
+    // types centered and every node will not need to own the
+    // type
+    std::deque<std::unique_ptr<Type>> Types;
+
+    // Some of the canonical types, never duplicated
+    BuiltinType *IntTy;
+    BuiltinType *LongTy;
+    BuiltinType *VoidTy;
     
 public:
     ASTContext(llvm::SourceMgr &SrcMgr, StringRef FileName)
         : SrcMgr(SrcMgr), FileName(FileName) {
+        auto i = std::make_unique<BuiltinType>(BuiltinType::Int);
+        IntTy = i.get(); Types.push_back(std::move(i));
+        auto l = std::make_unique<BuiltinType>(BuiltinType::Long);
+        LongTy = l.get(); Types.push_back(std::move(l));
+        auto v = std::make_unique<BuiltinType>(BuiltinType::Void);
+        VoidTy = v.get(); Types.push_back(std::move(v));
     }
 
     // Non-copyable, non-movable to ensure stable addresses
@@ -39,15 +58,15 @@ public:
     ASTContext(ASTContext&&) = delete;
     ASTContext& operator=(ASTContext&&) = delete;
 
-    StringRef getFileName() const {
+    [[nodiscard]] StringRef getFileName() const {
         return FileName;
     }
 
-    llvm::SourceMgr & getSourceMgr() {
+    SourceMgr & getSourceMgr() {
         return SrcMgr;
     }
 
-    const llvm::SourceMgr & getSourceMgr() const {
+    [[nodiscard]] const SourceMgr & getSourceMgr() const {
         return SrcMgr;
     }
     
@@ -91,6 +110,25 @@ public:
         Programs.emplace_back(std::move(node));
         return ptr;
     }
+
+    template<typename T, typename... Args>
+    T* createType(Args&&... args) {
+        auto node = std::make_unique<T>(std::forward<Args>(args)...);
+        T* ptr = node.get();
+        Types.emplace_back(std::move(node));
+        return ptr;
+    }
+
+    BuiltinType* getBuiltInType(BuiltinType::BuiltinKind Kind) {
+        if (Kind == BuiltinType::Int) return IntTy;
+        if (Kind == BuiltinType::Long) return LongTy;
+        if (Kind == BuiltinType::Void) return VoidTy;
+        return nullptr;
+    }
+
+    BuiltinType* getIntTy()  { return IntTy;  }
+    BuiltinType* getLongTy() { return LongTy; }
+    BuiltinType* getVoidTy() { return VoidTy; }
 };
 
 }

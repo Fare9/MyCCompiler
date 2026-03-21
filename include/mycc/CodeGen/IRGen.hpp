@@ -80,13 +80,17 @@ private:
     // Expression-specific generation methods
     ir::Value* generateVarExpression(const Var& VarExpr, ir::Function* IRFunc);
     ir::Value* generateAssignmentExpression(const AssignmentOperator& Assignment, ir::Function* IRFunc);
-    ir::Value* generateIntExpression(const IntegerLiteral& IntLit, ir::Function* IRFunc) const;
+    [[nodiscard]] ir::Value* generateConstantExpression(const Expr& ConstExpr) const;
     ir::Value* generateUnaryExpression(const UnaryOperator& UnaryOp, ir::Function* IRFunc);
     ir::Value* generateBinaryExpression(const BinaryOperator& BinaryOp, ir::Function* IRFunc);
     ir::Value* generatePrefixExpression(const PrefixOperator& PrefixOp, ir::Function* IRFunc);
     ir::Value* generatePostfixExpression(const PostfixOperator& PostfixOp, ir::Function* IRFunc);
     ir::Value* generateConditionalExpression(const ConditionalExpr& CondExpr, ir::Function* IRFunc);
     ir::Value* generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc);
+    ir::Value* generateCastExpression(const CastExpr& CastExpr, ir::Function* IRFunc);
+
+    // Lowers an AST type to an IR type
+    [[nodiscard]] ir::Type* lowerType(Type* astType) const;
 };
 
 }

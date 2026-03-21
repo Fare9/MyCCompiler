@@ -4,10 +4,12 @@
 #include "mycc/AST/ASTContext.hpp"
 #include "mycc/Sema/Scope.hpp"
 #include "mycc/Basic/Diagnostic.hpp"
-#include "llvm/ADT/StringMap.h"
-#include <vector>
+#include "mycc/Sema/Analyses/LabelGenerator.hpp"
+#include "mycc/Sema/Analyses/GotoLabelValidator.hpp"
 #include <string>
 #include <set>
+
+#include "Analyses/TypeExpressionInference.hpp"
 
 namespace mycc {
     /**
@@ -26,7 +28,7 @@ namespace mycc {
 
         DiagnosticsEngine &Diags;
         ASTContext &Context;
-        Scope *GlobalSymbolTable;  // Collects all top-level definitions for IR generation
+        Scope *GlobalSymbolTable; // Collects all top-level definitions for IR generation
         Scope *CurrentScope;
         bool avoid_errors = false;
 
@@ -38,117 +40,17 @@ namespace mycc {
         // later file-scope static declarations.
         std::set<std::string> BlockScopeExternLinkage;
 
+        // Used to generate labels for different parts of the code
+        // it is used in the Sema.cpp, and the analyses inside
+        // the Semantic part.
+        LabelGenerator Labels;
 
-        // Set that contains for a method the labels
-        std::set<StringRef> FunctionLabels;
-        // Set that contains all the jumped labels by Goto
-        std::set<StringRef> GotoLabels;
+        // Validator to check the GotoLabels
+        GotoLabelValidator gotoLabelValidator;
 
-        // Counter for generating unique loop labels
-        unsigned int LoopLabelCounter = 0;
-        // Counter to generate Switch and Case labels
-        unsigned int SwitchLabelCounter = 0;
-        unsigned int CaseLabelCounter = 0;
-        unsigned int DefaultLabelCounter = 0;
-
-        /**
-         * @brief We keep this structure to maintain the context for the break instructions.
-         * with the `base_level` we generate the break and the continue label. We also
-         * keep metadata to know if we are inside a loop.
-         */
-        struct BreakableContext {
-            std::string base_label;
-            bool is_loop; // metadata, it contains true for loops, and false for switches
-
-            [[nodiscard]] std::string get_break_label() const {
-                return base_label + "_end";
-            }
-
-            [[nodiscard]] std::string get_continue_label() const {
-                return base_label + "_continue";
-            }
-        };
-
-
-        // Loop label assignment helpers
-
-        /**
-         * @brief Generate a unique label for a loop construct.
-         * @return Unique loop label string.
-         */
-        std::string generateLoopLabel();
-
-        /**
-         * @brief Traverse a statement and assign labels to break/continue targets.
-         * @param stmt Statement to traverse.
-         * @param breakableStack Stack of breakable contexts (loops and switches).
-         */
-        void traverseStatement(Statement *stmt, std::vector<BreakableContext> &breakableStack);
-
-        /**
-         * @brief Traverse a block item (statement or declaration) for label assignment.
-         * @param item Block item to traverse.
-         * @param breakableStack Stack of breakable contexts (loops and switches).
-         */
-        void traverseBlockItem(BlockItem &item, std::vector<BreakableContext> &breakableStack);
-
-        // Switch label assignment helpers
-
-        /**
-         * @brief Generate a unique label for a switch statement.
-         * @return Unique switch label string.
-         */
-        std::string generateSwitchLabel();
-
-        /**
-         * @brief Generate a unique label for a case statement.
-         * @return Unique case label string.
-         */
-        std::string generateCaseLabel();
-
-        /**
-         * @brief Generate a unique label for a default statement.
-         * @return Unique default label string.
-         */
-        std::string generateDefaultLabel();
-
-        /**
-         * @brief Check if an expression is a constant expression.
-         * @param expr Expression to check.
-         * @return true if the expression is a constant, false otherwise.
-         */
-        static bool isConstantExpression(Expr *expr);
-
-        /**
-         * @brief Evaluate a constant expression to an integer value.
-         * @param expr Constant expression to evaluate.
-         * @return Integer value of the constant expression.
-         */
-        static int64_t evaluateConstantExpression(Expr *expr);
-
-        /**
-         * @brief Validate the body of a switch statement.
-         *
-         * Checks for:
-         * - Case values are constant expressions
-         * - No duplicate case values
-         * - At most one default case
-         * - No declarations immediately after case/default labels
-         *
-         * @param body Switch body statement.
-         * @param seenCaseValues Set to track duplicate case values.
-         * @param hasDefault Flag to track if default case was seen.
-         */
-        void validateSwitchBody(Statement *body,
-                                std::set<int64_t> &seenCaseValues,
-                                bool &hasDefault);
-
-        // Final passes from Semantic Analysis
-
-        /**
-         * @brief Verify all goto labels reference defined labels in the function.
-         */
-        void checkGotoLabelsCorrectlyPointToFunction() const;
+        // Expression Inference pass, it will be used to get the
+        // correct type from the different expressions
+        std::unique_ptr<TypeExpressionInference> typeExpressionInference;
 
         /**
          * Compute the Linkage depending on the Storage class and the scope.
@@ -158,19 +60,42 @@ namespace mycc {
          */
         static Linkage computeLinkage(std::optional<StorageClass> sc, ScopeType scope);
 
+        Expr* coerce(SMLoc Loc, Expr *expr, Type *targetType) const;
+
+        /// @brief Create a typed compile-time initializer for static storage.
+        /// Converts rawValue to the correct width for targetType and returns
+        /// an IntInit or LongInit node that IRGen can emit directly.
+        [[nodiscard]] Expr* actOnStaticInit(Type *targetType, int64_t rawValue) const;
+
+        template<typename F>
+        [[nodiscard]] bool shouldError(bool condition, F &&report) const {
+            if (!avoid_errors && condition) {
+                std::forward<F>(report)();
+                return true;
+            }
+            return false;
+        }
+
     public:
         /**
          * @brief Constructs a Sema object for semantic analysis.
          * @param Diags Diagnostics engine for error reporting.
          * @param Context AST context for creating AST nodes.
          */
-        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context), GlobalSymbolTable(nullptr), CurrentScope(nullptr) {
+        explicit Sema(DiagnosticsEngine &Diags, ASTContext &Context) : Diags(Diags), Context(Context),
+                                                                       GlobalSymbolTable(nullptr),
+                                                                       CurrentScope(nullptr),
+                                                                       typeExpressionInference(
+                                                                           std::make_unique<TypeExpressionInference>(
+                                                                               Context)) {
             initialize();
         }
 
         ~Sema() {
             delete GlobalSymbolTable;
         }
+
+        void assignLoopLabels(FunctionDeclaration &F);
 
         /**
          * @brief Disable error reporting (useful for testing).
@@ -183,7 +108,7 @@ namespace mycc {
             return avoid_errors;
         }
 
-        [[nodiscard]] const Scope& getGlobalSymbolTable() const {
+        [[nodiscard]] const Scope &getGlobalSymbolTable() const {
             return *GlobalSymbolTable;
         }
 
@@ -214,12 +139,6 @@ namespace mycc {
         void exitScope();
 
         /**
-         * @brief Assign unique labels to loops, breaks, and continues in a function.
-         * @param F The function to process.
-         */
-        void assignLoopLabels(FunctionDeclaration &F);
-
-        /**
          * @brief Create a Program node from a list of declarations.
          * @param Decls List of declarations in the program.
          * @return Pointer to the created Program node.
@@ -231,17 +150,21 @@ namespace mycc {
          * @param Loc Source location of the function declaration.
          * @param Name Function name.
          * @param args Function parameters.
+         * @param funcType The type of the function.
          * @return Pointer to the created Function node.
          */
-        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args, std::optional<StorageClass> storageClass);
+        FunctionDeclaration *actOnFunctionDeclaration(SMLoc Loc, StringRef Name, ArgsList &args,
+                                                      std::optional<StorageClass> storageClass,
+                                                      FunctionType *funcType);
 
         /**
          * @brief Process a parameter declaration and create a Var node with unique name.
          * @param Loc Source location of the parameter.
          * @param Name Parameter name.
+         * @param type Type of the parameter.
          * @return Pointer to the created Var node, or nullptr on error.
          */
-        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name) const;
+        [[nodiscard]] Var *actOnParameterDeclaration(SMLoc Loc, StringRef Name, Type *type) const;
 
         /**
          * @brief Process a local variable declaration and add it to the current scope.
@@ -256,7 +179,7 @@ namespace mycc {
          * @return true on error, false on success.
          */
         bool actOnVarDeclaration(BlockItems &Items, SMLoc Loc, StringRef Name,
-                                 std::optional<StorageClass> storageClass);
+                                 std::optional<StorageClass> storageClass, Type *type);
 
         /**
          * @brief Validate and set the initializer for a variable declaration.
@@ -287,10 +210,12 @@ namespace mycc {
          * @param Name Variable name.
          * @param initExpr Optional initializer expression (must be constant if present).
          * @param storageClass Storage class specifier (Static, Extern, or none).
+         * @param type type of the variable.
          * @return VarDeclaration pointer on success, nullptr on error.
          */
         [[nodiscard]] VarDeclaration *actOnGlobalVarDeclaration(SMLoc Loc, StringRef Name, Expr *initExpr,
-                                                                 std::optional<StorageClass> storageClass);
+                                                                std::optional<StorageClass> storageClass,
+                                                                Type *type);
 
         /**
          * @brief Create a return statement.
@@ -376,7 +301,8 @@ namespace mycc {
          * @param Post Post-iteration expression.
          * @param Body Loop body statement.
          */
-        void actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post, Statement *Body) const;
+        void actOnForStatement(BlockItems &Items, SMLoc Loc, ForInit &Init, Expr *Cond, Expr *Post,
+                               Statement *Body) const;
 
         /**
          * @brief Create a break statement.
@@ -418,12 +344,13 @@ namespace mycc {
 
 
         /**
-         * @brief Create an integer literal expression.
+         * @brief Create a const literal expression.
+         * Unsuffixed literals that exceed INT32_MAX are implicitly promoted to long.
          * @param Loc Source location of the literal.
          * @param Literal String representation of the integer.
-         * @return Pointer to the created IntegerLiteral node.
+         * @return IntegerLiteral, or LongLiteral on implicit promotion, or nullptr on overflow.
          */
-        [[nodiscard]] IntegerLiteral *actOnIntegerLiteral(SMLoc Loc, StringRef Literal) const;
+        [[nodiscard]] Expr *actOnConstLiteral(SMLoc Loc, StringRef Literal) const;
 
         /**
          * @brief Create a unary operator expression.
@@ -442,7 +369,8 @@ namespace mycc {
          * @param right Right operand expression.
          * @return Pointer to the created BinaryOperator node.
          */
-        BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left, Expr *right) const;
+        BinaryOperator *actOnBinaryOperator(SMLoc Loc, BinaryOperator::BinaryOpKind Kind, Expr *left,
+                                            Expr *right);
 
         /**
          * @brief Create an assignment expression and validate the lvalue.
@@ -451,7 +379,7 @@ namespace mycc {
          * @param right Right-hand side expression.
          * @return Pointer to the created AssignmentOperator node, or nullptr if left is not an lvalue.
          */
-        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right) const;
+        AssignmentOperator *actOnAssignment(SMLoc Loc, Expr *left, Expr *right);
 
         /**
          * @brief Create a prefix increment/decrement expression and validate the lvalue.
@@ -499,6 +427,8 @@ namespace mycc {
          * @return Pointer to the created FunctionCallExpr node.
          */
         FunctionCallExpr *actOnFunctionCallOperator(SMLoc Loc, StringRef name, ExprList &args) const;
+
+        CastExpr *actOnCastOperator(SMLoc Loc, Expr *expr, Type *type) const;
     };
 
     /**

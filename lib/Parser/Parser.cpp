@@ -2,7 +2,130 @@
 
 #include "mycc/AST/AST.hpp"
 
+#include <unordered_map>
+
 using namespace mycc;
+
+namespace {
+
+    /// ToDo: This part will need better work once we add more types.
+
+    /// Bitmask for type-specifier keywords. Adding a new keyword only requires
+    /// a new bit here, a new entry in typeBitMap, and new rows in validTypeSpecs.
+    enum TypeSpecBit : unsigned {
+        TS_int  = 1u << 0,
+        TS_long = 1u << 1,
+        // future: TS_unsigned = 1u << 2, TS_short = 1u << 3, ...
+    };
+
+    /// Maps each type-keyword token to its TypeSpecBit.
+    /// Extend this (and allowedTypes + validTypeSpecs) to support new keywords.
+    const std::unordered_map<tok::TokenKind, unsigned> typeBitMap {
+        { tok::kw_int,  TS_int  },
+        { tok::kw_long, TS_long },
+        // future: { tok::kw_unsigned, TS_unsigned }, ...
+    };
+
+    /// Flat list of type-keyword tokens, used with isOneOf() throughout the parser.
+    constexpr tok::TokenKind allowedTypes[] = {
+        tok::kw_int,
+        tok::kw_long,
+        // future: tok::kw_unsigned, ...
+    };
+
+    /// Maps valid type-specifier bit combinations to their resolved BuiltinKind.
+    struct TypeSpecEntry { unsigned bits; BuiltinType::BuiltinKind kind; };
+    constexpr TypeSpecEntry validTypeSpecs[] = {
+        { TS_int,           BuiltinType::Int  },
+        { TS_long,          BuiltinType::Long },
+        { TS_int | TS_long, BuiltinType::Long }, // `int long` == `long int`
+        // future: { TS_unsigned | TS_int, BuiltinType::UInt }, ...
+    };
+
+    /// @brief Consume all declaration specifiers (type keywords and, when
+    /// outStorageClass is non-null, extern/static) in one loop. Uses typeBitMap
+    /// for type keywords so adding new ones only requires updating that map.
+    ///
+    /// @param Lex                Lexer to move between tokens, we use it
+    ///                           to advance tokens.
+    /// @param Diag               Reference to the DiagnosticEngine to emit all
+    ///                           the error messages.
+    /// @param Tok                Reference to the current token.
+    /// @param outStorageClass    If non-null, storage-class specifiers are
+    ///                           consumed and written here.
+    /// @param outStorageClassLoc If non-null, receives the location of the
+    ///                           storage-class keyword (for diagnostics).
+    /// @return the resolved Type, or nullptr if no type keyword was present
+    ///         (caller should report) or if an error was already reported.
+    Type* parseType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok, ASTContext &Ctx,
+                                    std::optional<StorageClass> *outStorageClass = nullptr,
+                                    SMLoc *outStorageClassLoc = nullptr) {
+        unsigned seen = 0;
+        bool seenExtern = false, seenStatic = false;
+
+        while (Tok.isOneOf(allowedTypes) ||
+               (outStorageClass && (Tok.is(tok::kw_extern) || Tok.is(tok::kw_static)))) {
+
+            // If we find a type token, we apply the bit logic so we know if the type
+            // was find correctly
+            if (auto it = typeBitMap.find(Tok.getKind()); it != typeBitMap.end()) {
+                const unsigned bit = it->second;
+                if (seen & bit) {
+                    Diag.report(Tok.getLocation(), diag::err_declaration_has_type);
+                    return nullptr;
+                }
+                seen |= bit;
+            } else if (Tok.is(tok::kw_extern)) { // extern found
+                if (outStorageClassLoc) *outStorageClassLoc = Tok.getLocation();
+                seenExtern = true;
+            } else { // kw_static
+                if (outStorageClassLoc) *outStorageClassLoc = Tok.getLocation();
+                seenStatic = true;
+            }
+
+            Lex.next(Tok);
+        }
+
+        // both static and extern is not possible
+        if (seenStatic && seenExtern) {
+            Diag.report(Tok.getLocation(), diag::err_declaration_conflicting_storage_class);
+            return nullptr;
+        }
+
+        // if OutStorageClass was provided, assign Extern or Static
+        if (outStorageClass) {
+            if (seenExtern) *outStorageClass = StorageClass::SC_Extern;
+            else if (seenStatic) *outStorageClass = StorageClass::SC_Static;
+        }
+
+        // no type keywords only storage-class or nothing
+        if (!seen)
+            return nullptr;
+
+        for (const auto &[bits, kind] : validTypeSpecs)
+            if (bits == seen) {
+                switch (kind) {
+                    case BuiltinType::Int:  return Ctx.getIntTy();
+                    case BuiltinType::Long: return Ctx.getLongTy();
+                    case BuiltinType::Void: return Ctx.getVoidTy();
+                }
+            }
+        Diag.report(Tok.getLocation(), diag::err_declaration_has_type);
+        return nullptr;
+    }
+
+    /// @brief Parse a type-specifier sequence for a function parameter and push
+    /// the result into argTypes. Storage-class keywords are not consumed here.
+    /// @return true on success, false if no type keyword was found.
+    bool parseParamType(Lexer &Lex, DiagnosticsEngine &Diag, Token &Tok, ASTContext &Ctx,
+                        std::vector<Type*> &argTypes) {
+        Type *type = parseType(Lex, Diag, Tok, Ctx);
+        if (!type)
+            return false;
+        argTypes.push_back(type);
+        return true;
+    }
+}
 
 Parser::Parser(Lexer &Lex, Sema &Actions, ASTContext &Context) : Lex(Lex), Actions(Actions), Context(Context) {
 }
@@ -41,7 +164,8 @@ std::vector specifiers = {
 };
 
 std::vector types = {
-    tok::kw_int
+    tok::kw_int,
+    tok::kw_long
 };
 
 bool Parser::parseDeclaration(DeclarationList &Decls) {
@@ -57,7 +181,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     if (Tok.is(tok::l_paren)) {
         // Function declaration
         FunctionDeclaration *Func = nullptr;
-        if (!parseFunctionRest(Func, loc, name, storageClass))
+        if (parseFunctionRest(Func, loc, name, storageClass, type))
             return true;
 
         // Check for duplicate declarations
@@ -78,7 +202,7 @@ bool Parser::parseDeclaration(DeclarationList &Decls) {
     } else {
         // Variable declaration
         VarDeclaration *Var = nullptr;
-        if (!parseGlobalVarRest(Var, loc, name, storageClass))
+        if (parseGlobalVarRest(Var, loc, name, storageClass, type))
             return true;
 
         Decls.emplace_back(Var);
@@ -94,54 +218,32 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
     storageClass = std::nullopt;
     type = nullptr;
 
-    while (Tok.isOneOf(specifiers) || Tok.isOneOf(types)) {
-        if (Tok.isOneOf(specifiers)) {
-            if (!allowStorageClass && !Actions.is_avoid_errors_active()) {
-                getDiagnostics().report(Tok.getLocation(),
-                                        diag::err_for_loop_cannot_have_storage_class);
-                return true;
-            }
-            if (Tok.is(tok::kw_extern)) {
-                // if someone used `extern` after `static`
-                if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Static) {
-                    getDiagnostics().report(Tok.getLocation(),
-                                            diag::err_declaration_already_static);
-                    return true;
-                }
-                storageClass = StorageClass::SC_Extern;
-            } else if (Tok.is(tok::kw_static)) {
-                // if someone used `static` after `extern`
-                if (storageClass.has_value() && storageClass.value() == StorageClass::SC_Extern) {
-                    getDiagnostics().report(Tok.getLocation(),
-                                            diag::err_declaration_already_extern);
-                    return true;
-                }
-                storageClass = StorageClass::SC_Static;
-            }
-        } else if (Tok.is(tok::kw_int)) {
-            // Check there's no double declaration
-            if (type != nullptr) {
-                getDiagnostics().report(Tok.getLocation(),
-                                        diag::err_declaration_has_type);
-                delete type;
-                return true;
-            }
-            type = new BuiltinType(BuiltinType::Int);
-        }
-        advance();
+    SMLoc scLoc;
+    auto parsedType = parseType(Lex, getDiagnostics(), Tok, Context, &storageClass, &scLoc);
+
+    // If a storage-class was found but isn't allowed here (e.g. inside a for-loop
+    // init), report at the precise location of that keyword.
+    if (storageClass.has_value() && !allowStorageClass && !Actions.is_avoid_errors_active()) {
+        getDiagnostics().report(scLoc, diag::err_for_loop_cannot_have_storage_class);
+        return true;
     }
 
-    // Expect identifier
+    // Expect identifier either way so we get a good error location.
     if (expect(tok::identifier))
         return true;
 
-    if (type == nullptr) {
+    if (!parsedType) {
+        // parseType consumed no type keywords — report missing-type error now
+        // that we know the identifier name. If parseType already reported an
+        // internal error it will have returned nullptr with Tok NOT at an
+        // identifier, so expect() above would have caught it first.
         getDiagnostics().report(Tok.getLocation(),
                                 diag::err_declaration_has_no_type,
                                 Tok.getIdentifier().str());
         return true;
     }
 
+    type = parsedType;
     name = Tok.getIdentifier();
     loc = Tok.getLocation();
     advance();
@@ -149,17 +251,17 @@ bool Parser::parseDeclarationHeader(std::optional<StorageClass> &storageClass,
     return false;
 }
 
-
 bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef funcName,
-                               std::optional<StorageClass> storageClass) {
+                               std::optional<StorageClass> storageClass, Type *retType) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
-        return false;
+        return true;
     };
 
     ArgsList args;
     BlockItems body;
+    std::vector<Type*> argTypes;
     bool parsedBody = false;
 
     // consume '('
@@ -178,24 +280,29 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (consume(tok::kw_int))
+        if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
             return _errorhandler();
+        // no advance() — parseParamType already consumed all type keywords
+
         if (expect(tok::identifier))
             return _errorhandler();
 
-        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
         if (param)
             args.push_back(param);
         advance();
 
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
-            if (consume(tok::kw_int))
+
+            if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
                 return _errorhandler();
+            // no advance() — parseParamType already consumed all type keywords
+
             if (expect(tok::identifier))
                 return _errorhandler();
 
-            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
             if (!param)
                 return _errorhandler();
             args.push_back(param);
@@ -207,7 +314,8 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
         return _errorhandler();
 
     // Generate a new function or obtain a previous one
-    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass);
+    auto *funcType = Context.createType<FunctionType>(retType, std::move(argTypes));
+    F = Actions.actOnFunctionDeclaration(funcLoc, funcName, args, storageClass, funcType);
     if (!F)
         return _errorhandler();
 
@@ -251,15 +359,15 @@ bool Parser::parseFunctionRest(FunctionDeclaration *&F, SMLoc funcLoc, StringRef
     // and the break/continue
     Actions.assignLoopLabels(*F);
 
-    return true;
+    return false;
 }
 
 bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
-                                std::optional<StorageClass> storageClass) {
+                                std::optional<StorageClass> storageClass, Type *type) {
     auto _errorhandler = [this] {
         while (!Tok.is(tok::eof))
             advance();
-        return false;
+        return true;
     };
 
     Expr *initExpr = nullptr;
@@ -275,11 +383,11 @@ bool Parser::parseGlobalVarRest(VarDeclaration *&V, SMLoc loc, StringRef name,
         return _errorhandler();
 
     // Perform semantic analysis for the global variable declaration
-    V = Actions.actOnGlobalVarDeclaration(loc, name, initExpr, storageClass);
+    V = Actions.actOnGlobalVarDeclaration(loc, name, initExpr, storageClass, type);
     if (!V)
         return _errorhandler();
 
-    return true;
+    return false;
 }
 
 
@@ -298,11 +406,11 @@ bool Parser::parseBlock(BlockItems &Items) {
             // Check if it's a function (has '(') or variable (has '=' or ';')
             if (Tok.is(tok::l_paren)) {
                 // Function declaration in block
-                if (parseFunctionDeclarationStmt(Items, loc, name, storageClass))
+                if (parseFunctionDeclarationStmt(Items, loc, name, type, storageClass))
                     return true;
             } else {
                 // Variable declaration
-                if (parseVariableDeclInline(Items, loc, name, storageClass))
+                if (parseVariableDeclInline(Items, loc, name, type, storageClass))
                     return true;
             }
         } else {
@@ -323,7 +431,7 @@ bool Parser::parseVarDeclaration(BlockItems &Items, const bool allowStorageClass
         return true;
 
     // Add variable to scope first (so it can be referenced in initializer)
-    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass))
+    if (Actions.actOnVarDeclaration(Items, loc, name, storageClass, type))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
@@ -731,10 +839,12 @@ bool Parser::parseSwitchStatement(BlockItems &Items) {
     return false;
 }
 
-bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name,
+bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRef Name, Type *retType,
                                           std::optional<StorageClass> storageClass) {
     ArgsList args;
     BlockItems body;
+    std::vector<Type*> argTypes;
+
     bool parsedBody = false;
 
     if (consume(tok::l_paren))
@@ -746,24 +856,27 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         advance();
     } else if (!Tok.is(tok::r_paren)) {
         // int foo(int x, int y, ...) - has parameters
-        if (consume(tok::kw_int))
+        if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
             return true;
+        // no advance() — parseParamType already consumed all type keywords
+
         if (expect(tok::identifier))
             return true;
 
-        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+        Var *param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
         if (param)
             args.push_back(param);
         advance();
 
         while (Tok.is(tok::comma)) {
             advance(); // consume comma
-            if (consume(tok::kw_int))
+            if (!parseParamType(Lex, getDiagnostics(), Tok, Context, argTypes))
                 return true;
+            // no advance() — parseParamType already consumed all type keywords
             if (expect(tok::identifier))
                 return true;
 
-            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier());
+            param = Actions.actOnParameterDeclaration(Tok.getLocation(), Tok.getIdentifier(), argTypes.back());
             if (param)
                 args.push_back(param);
             advance();
@@ -774,7 +887,8 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
         return true;
 
     // Create a Function object with no body (declaration only)
-    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass);
+    auto *funcType = Context.createType<FunctionType>(retType, std::move(argTypes));
+    FunctionDeclaration *F = Actions.actOnFunctionDeclaration(Loc, Name, args, storageClass, funcType);
     if (!F)
         return true;
 
@@ -819,12 +933,13 @@ bool Parser::parseFunctionDeclarationStmt(BlockItems &Items, SMLoc Loc, StringRe
 }
 
 bool Parser::parseVariableDeclInline(BlockItems &Items, SMLoc Loc, StringRef Name,
+                                     Type *type,
                                      std::optional<StorageClass> storageClass) {
     // We've already consumed 'int' and identifier
     // Now at '=' or ';'
 
     // Add variable to scope first (so it can be referenced in initializer)
-    if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass))
+    if (Actions.actOnVarDeclaration(Items, Loc, Name, storageClass, type))
         return true;
 
     VarDeclaration *decl = std::get<VarDeclaration *>(Items.back());
@@ -1022,13 +1137,13 @@ bool Parser::parseExpr(Expr *&E, int min_precedence) {
 
             advance(); // consume '?'
 
-            Expr *middle, *right;
+            Expr *middle, *after_middle;
             // first we parse a middle expression
             parseMiddle(middle);
             // then we parse the right one after ":"
-            parseExpr(right, precedence);
+            parseExpr(after_middle, precedence);
 
-            left = Actions.actOnTernaryOperator(Loc, left, middle, right);
+            left = Actions.actOnTernaryOperator(Loc, left, middle, after_middle);
         }
         // any other binary operator
         else {
@@ -1066,7 +1181,9 @@ bool Parser::parseFactor(Expr *&E) {
     };
     // the factor is an integer
     if (Tok.is(tok::integer_literal)) {
-        E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
+        E = Actions.actOnConstLiteral(Tok.getLocation(), Tok.getLiteralData());
+        if (!E)
+            return true;
         advance();
     }
     // the factor is an identifier (it can contain postfix operator)
@@ -1120,11 +1237,7 @@ bool Parser::parseFactor(Expr *&E) {
     }
 
     // Look for unary operators or for prefix operators
-    else if
-    (Tok
-        .
-        isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)
-    ) {
+    else if (Tok.isOneOf(tok::minus, tok::tilde, tok::exclaim, tok::increment, tok::decrement)) {
         tok::TokenKind OpKind = Tok.getKind();
         SMLoc OpLoc = Tok.getLocation();
         advance();
@@ -1144,44 +1257,56 @@ bool Parser::parseFactor(Expr *&E) {
         else if (OpKind == tok::decrement)
             E = Actions.actOnPrefixOperator(OpLoc, PrefixOperator::PrefixOpKind::POK_PreDecrement, internalExpr);
     }
-    // Parentheses expression (<expr>)
-    else if
-    (Tok
-        .
-        is(tok::l_paren)
-    ) {
+    // Parentheses expression:
+    // Cast: (type) expr;
+    // Parentheses expression: (<expr>)
+    else if(Tok.is(tok::l_paren)) {
         advance();
-        if (parseExpr(E, 0))
-            return _errorhandler();
-        if (consume(tok::r_paren))
-            return _errorhandler();
+        SMLoc typeLoc = Tok.getLocation();
+        auto *type = parseType(Lex, getDiagnostics(), Tok, Context);
 
-        // Check for postfix operators after parenthesized expressions
-        if (Tok.isOneOf(tok::increment, tok::decrement)) {
-            tok::TokenKind OpKind = Tok.getKind();
-            SMLoc OpLoc = Tok.getLocation();
-            advance();
-            if (OpKind == tok::increment)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
-            else if (OpKind == tok::decrement)
-                E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+        if (type == nullptr) {
+            if (parseExpr(E, 0))
+                return _errorhandler();
+            if (consume(tok::r_paren))
+                return _errorhandler();
+
+            // Check for postfix operators after parenthesized expressions
+            if (Tok.isOneOf(tok::increment, tok::decrement)) {
+                tok::TokenKind OpKind = Tok.getKind();
+                SMLoc OpLoc = Tok.getLocation();
+                advance();
+                if (OpKind == tok::increment)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostIncrement, E);
+                else if (OpKind == tok::decrement)
+                    E = Actions.actOnPostfixOperator(OpLoc, PostfixOperator::PostfixOpKind::POK_PostDecrement, E);
+            }
         }
-    } else
-        return
-                _errorhandler();
-
-    return
-            false;
+        else {
+            // parseType already advanced past all type keywords; Tok is now ')'
+            // Use parseFactor (not parseExpr) so the cast binds tightly, matching
+            // the C grammar: cast-expression → ( type-name ) cast-expression
+            // e.g. `(long) i = 10` → `((long)i) = 10`, NOT `(long)(i = 10)`
+            if (consume(tok::r_paren))
+                return _errorhandler();
+            if (parseFactor(E))
+                return _errorhandler();
+            E = Actions.actOnCastOperator(typeLoc, E, type);
+        }
+    } else {
+        return _errorhandler();
+    }
+    return false;
 }
 
 int Parser::get_operator_kind_by_expr(Expr *expr) {
-    if (BinaryOperator *binOp = reinterpret_cast<BinaryOperator *>(expr)) {
+    if (auto *binOp = reinterpret_cast<BinaryOperator *>(expr)) {
         return binary_operators_precedence[binOp->getOperatorKind()];
     }
-    if (AssignmentOperator *assignOp = reinterpret_cast<AssignmentOperator *>(expr)) {
+    if ([[maybe_unused]] auto *assignOp = reinterpret_cast<AssignmentOperator *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Assign];
     }
-    if (ConditionalExpr *condExpr = reinterpret_cast<ConditionalExpr *>(expr)) {
+    if ([[maybe_unused]] auto *condExpr = reinterpret_cast<ConditionalExpr *>(expr)) {
         return binary_operators_precedence[BinaryOperator::BinaryOpKind::Bok_Interrogation];
     }
     return 0;

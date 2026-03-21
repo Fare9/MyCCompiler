@@ -5,6 +5,7 @@
 DIAG(err_expected, Error, "expected {} but found {}")
 DIAG(err_unexpected_token, Error, "unexpected character '{}' in source")
 DIAG(err_invalid_suffix_integer, Error, "invalid suffix '{0}' on integer literal")
+DIAG(err_long_literal_too_large, Error, "integer literal is too large to be represented in type 'long'")
 
 DIAG(err_duplicate_symbol_in_scope, Error, "Error, symbol with name '{}' has already been defined in the scope")
 
@@ -20,6 +21,8 @@ DIAG(err_wrong_argument_call, Error, "Error, function '{}' called with {} parame
 DIAG(err_incorrect_lvalue, Error, "Invalid lvalue used")
 DIAG(err_existing_label, Error, "Error, the label {} already exists in the function")
 DIAG(err_undefined_label, Error, "use of undeclared label '{}'")
+DIAG(err_non_compatible_types, Error, "Error, the types from left and right side are not compatible")
+DIAG(err_var_with_other_type_declared, Error, "Error, the variable {} was already declared with other type")
 
 DIAG(err_expected_statement_after_label, Error, "Error, expected a statement after a label, not a declaration")
 DIAG(err_label_cannot_end_block, Error, "Error, label cannot be the last statement of a block")
@@ -37,6 +40,7 @@ DIAG(err_declaration_after_case_label, Error, "a label can only be part of a sta
 DIAG(err_declaration_has_no_type, Error, "declaration {} was specified without a type")
 DIAG(err_declaration_already_extern, Error, "declaration already has an 'extern' storage class")
 DIAG(err_declaration_already_static, Error, "declaration already has an 'static' storage class")
+DIAG(err_declaration_conflicting_storage_class, Error, "cannot combine 'extern' and 'static' storage classes")
 DIAG(err_declaration_has_type, Error, "declaration already has a type assigned")
 DIAG(err_for_loop_cannot_have_storage_class, Error, "a declaration in a for loop cannot have a storage class")
 

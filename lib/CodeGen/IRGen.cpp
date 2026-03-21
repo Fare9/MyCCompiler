@@ -3,16 +3,32 @@
 #include <set>
 
 #include "llvm/Support/Casting.h"
+#include "mycc/Sema/Analyses/TypeExpressionInference.hpp"
 
 using namespace mycc;
 using namespace mycc::codegen;
 
-void IRGenerator::generateIR(const Program &ASTProgram, const Scope& symbols) {
+// ---------------------------------------------------------------------------
+// Type lowering: AST type → IR type
+// ---------------------------------------------------------------------------
+
+ir::Type *IRGenerator::lowerType(Type *astType) const {
+    if (auto *bt = llvm::dyn_cast<BuiltinType>(astType)) {
+        switch (bt->getBuiltinKind()) {
+            case BuiltinType::Int: return Ctx.getInt32Ty();
+            case BuiltinType::Long: return Ctx.getInt64Ty();
+            case BuiltinType::Void: return Ctx.getVoidTy();
+        }
+    }
+    return nullptr; // unsupported type
+}
+
+void IRGenerator::generateIR(const Program &ASTProgram, const Scope &symbols) {
     // Store symbol table for lookups during expression generation
     Symbols = &symbols;
 
     // Convert each AST function to IR function
-    for (const auto& decl : ASTProgram) {
+    for (const auto &decl: ASTProgram) {
         if (const auto *ASTFunc = std::get_if<FunctionDeclaration *>(&decl)) {
             ir::Function *IRFunc = generateFunction(**ASTFunc);
             IRProg.add_function(IRFunc);
@@ -24,32 +40,40 @@ void IRGenerator::generateIR(const Program &ASTProgram, const Scope& symbols) {
     convertSymbolsToTacky(symbols);
 }
 
-void IRGenerator::convertSymbolsToTacky(const Scope& symbols) {
+void IRGenerator::convertSymbolsToTacky(const Scope &symbols) {
     std::set<std::string> StaticVars;
 
-    for (const auto& [name, entry] : symbols.getSymbols()) {
+    for (const auto &[name, entry]: symbols.getSymbols()) {
         // Skip if not a static variable (functions and local vars are skipped)
         if (!entry.isStaticAttr()) {
             continue;
         }
 
-        const StaticAttr* staticAttr = entry.getStaticAttr();
+        const StaticAttr *staticAttr = entry.getStaticAttr();
 
         // Skip if NoInitializer (extern declaration, defined elsewhere)
         if (staticAttr->init == InitialValue::NoInitializer) {
             continue;
         }
 
-        // Determine initial value
-        int initValue = 0;
+        // Determine initial value (use int64_t to preserve full 64-bit long values)
+        int64_t initValue = 0;
         if (staticAttr->init == InitialValue::Initial && staticAttr->value.has_value()) {
-            initValue = static_cast<int>(staticAttr->value.value());
+            initValue = staticAttr->value.value();
         }
         // Tentative definitions get initialized to 0 (already default)
 
         // Create the StaticVariable and add to program (avoid duplicates)
         if (StaticVars.insert(name.str()).second) {
-            auto* staticVar = new ir::StaticVariable(name, staticAttr->global, initValue);
+            auto *var = std::get<VarDeclaration *>(entry.decl);
+            // Use the initValue already resolved by the semantic analysis pass.
+            // Re-reading var->getExpr() can miss the initializer when the symbol table
+            // decl points to an earlier tentative declaration (e.g. `static int foo;`
+            // followed later by `static int foo = 4;`).
+            auto *staticVar = new ir::StaticVariable(name, // Name of static var
+                                                     staticAttr->global, // Is it a global value?
+                                                     lowerType(var->getType()), // get the IR type from the variable type
+                                                     initValue); // initial value of the variable
             IRProg.add_static_variable(staticVar);
         }
     }
@@ -66,7 +90,7 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
     std::vector<std::string> funcDeclaredVars;
 
     // Handle function parameters - rename them and create ParameterOp objects
-    auto *nonConstFunc = const_cast<FunctionDeclaration*>(&ASTFunc);
+    auto *nonConstFunc = const_cast<FunctionDeclaration *>(&ASTFunc);
     for (size_t i = 0, e = nonConstFunc->getArgs().size(); i < e; i++) {
         Var *param = nonConstFunc->getArg(i);
         if (!param) break;
@@ -74,8 +98,8 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
         StringRef paramName = param->getName();
         std::string uniqueName = generateUniqueVarName(paramName);
 
-        // Create ParameterOp with the unique name
-        auto *paramOp = new ir::ParameterOp(uniqueName);
+        // Create ParameterOp with the unique name and lowered IR type
+        auto *paramOp = new ir::ParameterOp(uniqueName, lowerType(param->getType()));
         args.push_back(paramOp);
 
         // Push to rename stack so references to this parameter use the unique name
@@ -83,9 +107,18 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
         funcDeclaredVars.push_back(paramName.str());
     }
 
+    // Build the IR FunctionType from the AST function type
+    ir::FunctionType *irFuncTy = nullptr;
+    if (auto *astFuncTy = ASTFunc.getFunctionType()) {
+        ir::Type *retTy = lowerType(astFuncTy->getReturnType());
+        std::vector<ir::Type *> paramTys;
+        for (auto *arg: args) paramTys.push_back(arg->getType());
+        irFuncTy = Ctx.createFunctionType(retTy, paramTys);
+    }
+
     // Now create the IR function with the parameters
     ir::InstList instructions;
-    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args, ASTFunc.isGlobal());
+    auto *IRFunc = new ir::Function(instructions, ASTFunc.getName(), args, ASTFunc.isGlobal(), irFuncTy);
 
     bool containsReturn = false;
 
@@ -99,7 +132,7 @@ ir::Function *IRGenerator::generateFunction(const FunctionDeclaration &ASTFunc) 
         }
 
         if (!containsReturn) {
-            ir::Int *RetVal = Ctx.createInt(llvm::APSInt::get(0));
+            ir::Constant *RetVal = Ctx.createConstant(Ctx.getInt32Ty(), 0);
             ir::Ret *RetInst = Ctx.createRet(RetVal);
             IRFunc->add_instruction(RetInst);
         }
@@ -235,8 +268,8 @@ void IRGenerator::generateDeclaration(const VarDeclaration &Decl, ir::Function *
         // First emit the right part of the assignment
         auto *result = generateExpression(*right, IRFunc);
 
-        // Create IR variable with the unique name
-        auto *varop = Ctx.getOrCreateVar(uniqueName);
+        // Create IR variable with the unique name and type
+        auto *varop = Ctx.getOrCreateVar(uniqueName, lowerType(Decl.getType()));
         IRFunc->add_instruction(Ctx.createCopy(result, varop));
     }
 }
@@ -429,8 +462,8 @@ void IRGenerator::generateForStmt(const Statement &Stmt, ir::Function *IRFunc) {
     exitScope(forDeclaredVars);
 }
 
-void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc) {
-    const auto & Switch = dynamic_cast<const SwitchStatement&>(Stmt);
+void IRGenerator::generateSwitchStmt(const Statement &Stmt, ir::Function *IRFunc) {
+    const auto &Switch = dynamic_cast<const SwitchStatement &>(Stmt);
 
     // Collect all cases and the default value
     std::vector<CaseInfo> cases;
@@ -440,34 +473,35 @@ void IRGenerator::generateSwitchStmt(const Statement& Stmt, ir::Function* IRFunc
 
     // Get break label for switch statement
     std::string switch_end = std::string(Switch.get_break_label());
-    auto* label_end = Ctx.getOrCreateLabel(switch_end, true);
+    auto *label_end = Ctx.getOrCreateLabel(switch_end, true);
 
     // Evaluate the switch condition once
-    auto * switchValue = generateExpression(*Switch.get_condition(), IRFunc);
+    auto *switchValue = generateExpression(*Switch.get_condition(), IRFunc);
 
     // Now generate the comparisons for each case
     // also generate the jump, so we later just need
     // to generate the labels
-    for (const auto & caseInfo : cases) {
+    for (const auto &caseInfo: cases) {
         // Evaluate the case constant
-        auto * caseValue = generateExpression(*caseInfo.value, IRFunc);
+        auto *caseValue = generateExpression(*caseInfo.value, IRFunc);
 
         // Compare the result using the case from the switch, and the case
-        auto * cmp = Ctx.createICmpOp(
-            dynamic_cast<ir::Operand*>(switchValue),
-            dynamic_cast<ir::Operand*>(caseValue),
-            ir::ICmpOp::eq);
+        auto *cmp = Ctx.createICmpOp(
+            dynamic_cast<ir::Operand *>(switchValue),
+            dynamic_cast<ir::Operand *>(caseValue),
+            ir::ICmpOp::eq,
+            Ctx.getInt32Ty());
         // add the comparison instruction
         IRFunc->add_instruction(cmp);
 
         // Jump to the case label if equal
-        auto* caseLabel = Ctx.getOrCreateLabel(caseInfo.label, true);
+        auto *caseLabel = Ctx.getOrCreateLabel(caseInfo.label, true);
         IRFunc->add_instruction(Ctx.createJNZ(cmp->getDestination(), caseLabel));
     }
 
     // no case matched, jump to default or end
     if (hasDefault) {
-        auto * defLabel = Ctx.getOrCreateLabel(defaultLabel, true);
+        auto *defLabel = Ctx.getOrCreateLabel(defaultLabel, true);
         IRFunc->add_instruction(Ctx.createJump(defLabel));
     } else {
         IRFunc->add_instruction(Ctx.createJump(label_end));
@@ -500,7 +534,10 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
         case Expr::Ek_AssignmentOperator:
             return generateAssignmentExpression(dynamic_cast<const AssignmentOperator &>(Expr), IRFunc);
         case Expr::Ek_Int:
-            return generateIntExpression(dynamic_cast<const IntegerLiteral &>(Expr), IRFunc);
+        case Expr::Ek_Long:
+        case Expr::Ek_IntInit:
+        case Expr::Ek_LongInit:
+            return generateConstantExpression(Expr);
         case Expr::Ek_UnaryOperator:
             return generateUnaryExpression(dynamic_cast<const UnaryOperator &>(Expr), IRFunc);
         case Expr::Ek_BinaryOperator:
@@ -513,6 +550,8 @@ ir::Value *IRGenerator::generateExpression(const Expr &Expr, ir::Function *IRFun
             return generateConditionalExpression(dynamic_cast<const ConditionalExpr &>(Expr), IRFunc);
         case Expr::Ek_FunctionCallOperator:
             return generateFunctionCallExpression(dynamic_cast<const FunctionCallExpr &>(Expr), IRFunc);
+        case Expr::Ek_Cast:
+            return generateCastExpression(dynamic_cast<const CastExpr &>(Expr), IRFunc);
     }
 
     return nullptr; // Should not reach here
@@ -529,15 +568,23 @@ ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFu
     if (irName == originalName.str()) {
         // Check if it's a known extern variable (defined in another translation unit)
         if (ExternVariables.count(irName)) {
-            return Ctx.getOrCreateStaticVar(originalName);
+            // Look up type from symbol table entry (Var node type may be null)
+            if (Symbols) {
+                if (const SymbolEntry *entry = Symbols->lookupEntry(originalName)) {
+                    auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                    return Ctx.getOrCreateStaticVar(originalName, lowerType(varDecl->getType()));
+                }
+            }
+            return Ctx.getOrCreateStaticVar(originalName, Ctx.getInt32Ty());
         }
 
         // Check for file-scope static variable (stored with original name)
         if (Symbols) {
-            if (const SymbolEntry* entry = Symbols->lookupEntry(originalName)) {
+            if (const SymbolEntry *entry = Symbols->lookupEntry(originalName)) {
                 if (entry->isStaticAttr()) {
-                    // File-scope static - use original name
-                    return Ctx.getOrCreateStaticVar(originalName);
+                    // File-scope static - use original name, get type from declaration
+                    auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                    return Ctx.getOrCreateStaticVar(originalName, lowerType(varDecl->getType()));
                 }
             }
         }
@@ -546,16 +593,20 @@ ir::Value *IRGenerator::generateVarExpression(const Var &var, ir::Function *IRFu
     // Check if irName is a static local variable (from rename stack)
     // Static locals have unique names like "functionName.varName" or "functionName.varName.1"
     if (Symbols) {
-        if (const SymbolEntry* entry = Symbols->lookupEntry(irName)) {
+        if (const SymbolEntry *entry = Symbols->lookupEntry(irName)) {
             if (entry->isStaticAttr()) {
-                // Static local - use the unique name from rename stack
-                return Ctx.getOrCreateStaticVar(irName);
+                // Static local - use the unique name from rename stack, type from declaration
+                auto *varDecl = std::get<VarDeclaration *>(entry->decl);
+                return Ctx.getOrCreateStaticVar(irName, lowerType(varDecl->getType()));
             }
         }
     }
 
-    // Local variable - use renamed name from the stack
-    return Ctx.getOrCreateVar(irName);
+    // Local variable - use renamed name from the stack.
+    // getOrCreateVar returns the existing VarOp if already registered by generateDeclaration,
+    // so the type fallback here is only used if the variable was somehow never declared.
+    ir::Type *ty = var.getType() ? lowerType(var.getType()) : Ctx.getInt32Ty();
+    return Ctx.getOrCreateVar(irName, ty);
 }
 
 ir::Value *IRGenerator::generateAssignmentExpression(const AssignmentOperator &assignment, ir::Function *IRFunc) {
@@ -569,9 +620,23 @@ ir::Value *IRGenerator::generateAssignmentExpression(const AssignmentOperator &a
     return varop;
 }
 
-ir::Value *IRGenerator::generateIntExpression(const IntegerLiteral &IntLit, ir::Function *IRFunc) const {
-    // Create integer constant in IR
-    return Ctx.createInt(IntLit.getValue());
+ir::Value *IRGenerator::generateConstantExpression(const Expr &ConstExpr) const {
+    switch (ConstExpr.getKind()) {
+        case Expr::Ek_Int:
+            return Ctx.createConstant(Ctx.getInt32Ty(),
+                                      llvm::cast<IntegerLiteral>(ConstExpr).getValue().getSExtValue());
+        case Expr::Ek_Long:
+            return Ctx.createConstant(Ctx.getInt64Ty(),
+                                      llvm::cast<LongLiteral>(ConstExpr).getValue().getSExtValue());
+        case Expr::Ek_IntInit:
+            return Ctx.createConstant(Ctx.getInt32Ty(),
+                                      llvm::cast<IntInit>(ConstExpr).getValue());
+        case Expr::Ek_LongInit:
+            return Ctx.createConstant(Ctx.getInt64Ty(),
+                                      llvm::cast<LongInit>(ConstExpr).getValue());
+        default:
+            return nullptr;
+    }
 }
 
 ir::Value *IRGenerator::generateUnaryExpression(const UnaryOperator &UnaryOp, ir::Function *IRFunc) {
@@ -652,7 +717,6 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
         case BinaryOperator::BoK_None:
         default:
             break;
-
     }
     // According to C standard the subexpressions of the same operation
     // are usually unsequenced, they can be evaluated in any order.
@@ -675,48 +739,45 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
         ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
         ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
 
+        // Comparisons always produce int
         ir::ICmpOp *CmpOp = Ctx.createICmpOp(dynamic_cast<ir::Operand *>(left),
-                                             dynamic_cast<ir::Operand *>(right), CmpKind);
+                                             dynamic_cast<ir::Operand *>(right), CmpKind,
+                                             Ctx.getInt32Ty());
         if (IRFunc != nullptr)
             IRFunc->add_instruction(CmpOp);
         return CmpOp->getDestination();
     }
 
     // Short-Circuiting for && instruction
+    // New Short-Circuiting must take into account the possible type
+    // for each side of the expression.
     if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_And) {
         auto *false_label = Ctx.getOrCreateLabel("false_label");
         auto *end_label = Ctx.getOrCreateLabel("end_label");
-        auto *result = Ctx.createReg();
-        auto *temp_left = Ctx.createReg();
-        auto *temp_right = Ctx.createReg();
-        auto *val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
-        auto *val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
+        auto *result = Ctx.createReg(Ctx.getInt32Ty());
+        auto *val_1 = Ctx.createConstant(Ctx.getInt32Ty(), 1);
+        auto *val_0 = Ctx.createConstant(Ctx.getInt32Ty(), 0);
 
         ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+        auto *leftOp = dynamic_cast<ir::Operand *>(left);
+        ir::Type *leftTy = (leftOp && leftOp->getType()) ? leftOp->getType() : Ctx.getInt32Ty();
+        auto *temp_left = Ctx.createReg(leftTy);
 
         if (IRFunc != nullptr) {
-            auto *mov_left = Ctx.createCopy(left, temp_left);
-            IRFunc->add_instruction(mov_left);
-
-            auto *jump_if_zero_left = Ctx.createJZ(temp_left, false_label);
-            IRFunc->add_instruction(jump_if_zero_left);
+            IRFunc->add_instruction(Ctx.createCopy(left, temp_left));
+            IRFunc->add_instruction(Ctx.createJZ(temp_left, false_label));
 
             ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
-            auto *mov_right = Ctx.createCopy(right, temp_right);
-            IRFunc->add_instruction(mov_right);
+            auto *rightOp = dynamic_cast<ir::Operand *>(right);
+            ir::Type *rightTy = (rightOp && rightOp->getType()) ? rightOp->getType() : Ctx.getInt32Ty();
+            auto *temp_right = Ctx.createReg(rightTy);
 
-            auto *jump_if_zero_right = Ctx.createJZ(temp_right, false_label);
-            IRFunc->add_instruction(jump_if_zero_right);
-
-            auto *set_result_to_1 = Ctx.createCopy(val_1, result);
-            IRFunc->add_instruction(set_result_to_1);
-
-            auto *jump_end = Ctx.createJump(end_label);
-            IRFunc->add_instruction(jump_end);
-            auto *set_result_to_0 = Ctx.createCopy(val_0, result);
+            IRFunc->add_instruction(Ctx.createCopy(right, temp_right));
+            IRFunc->add_instruction(Ctx.createJZ(temp_right, false_label));
+            IRFunc->add_instruction(Ctx.createCopy(val_1, result));
+            IRFunc->add_instruction(Ctx.createJump(end_label));
             IRFunc->add_instruction(false_label);
-
-            IRFunc->add_instruction(set_result_to_0);
+            IRFunc->add_instruction(Ctx.createCopy(val_0, result));
             IRFunc->add_instruction(end_label);
         }
 
@@ -727,39 +788,30 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
     if (BinaryOp.getOperatorKind() == BinaryOperator::Bok_Or) {
         auto *true_label = Ctx.getOrCreateLabel("true_label");
         auto *end_label = Ctx.getOrCreateLabel("end_label");
-        auto *result = Ctx.createReg();
-        auto *temp_left = Ctx.createReg();
-        auto *temp_right = Ctx.createReg();
-        auto *val_1 = Ctx.createInt(llvm::APSInt(llvm::APInt(32, abs(1))));
-        auto *val_0 = Ctx.createInt(llvm::APSInt(32, abs(0)));
+        auto *result = Ctx.createReg(Ctx.getInt32Ty());
+        auto *val_1 = Ctx.createConstant(Ctx.getInt32Ty(), 1);
+        auto *val_0 = Ctx.createConstant(Ctx.getInt32Ty(), 0);
 
         ir::Value *left = generateExpression(*BinaryOp.getLeft(), IRFunc);
+        auto *leftOp = dynamic_cast<ir::Operand *>(left);
+        ir::Type *leftTy = (leftOp && leftOp->getType()) ? leftOp->getType() : Ctx.getInt32Ty();
+        auto *temp_left = Ctx.createReg(leftTy);
 
         if (IRFunc != nullptr) {
-            auto *mov_left = Ctx.createCopy(left, temp_left);
-            IRFunc->add_instruction(mov_left);
-
-            auto *jump_if_not_zero_left = Ctx.createJNZ(temp_left, true_label);
-            IRFunc->add_instruction(jump_if_not_zero_left);
+            IRFunc->add_instruction(Ctx.createCopy(left, temp_left));
+            IRFunc->add_instruction(Ctx.createJNZ(temp_left, true_label));
 
             ir::Value *right = generateExpression(*BinaryOp.getRight(), IRFunc);
+            auto *rightOp = dynamic_cast<ir::Operand *>(right);
+            ir::Type *rightTy = (rightOp && rightOp->getType()) ? rightOp->getType() : Ctx.getInt32Ty();
+            auto *temp_right = Ctx.createReg(rightTy);
 
-            auto *mov_right = Ctx.createCopy(right, temp_right);
-            IRFunc->add_instruction(mov_right);
-
-            auto *jump_if_not_zero_right = Ctx.createJNZ(temp_right, true_label);
-            IRFunc->add_instruction(jump_if_not_zero_right);
-
-            auto *set_result_to_0 = Ctx.createCopy(val_0, result);
-            IRFunc->add_instruction(set_result_to_0);
-
-            auto *jump_end = Ctx.createJump(end_label);
-            IRFunc->add_instruction(jump_end);
-
-            auto *set_result_to_1 = Ctx.createCopy(val_1, result);
+            IRFunc->add_instruction(Ctx.createCopy(right, temp_right));
+            IRFunc->add_instruction(Ctx.createJNZ(temp_right, true_label));
+            IRFunc->add_instruction(Ctx.createCopy(val_0, result));
+            IRFunc->add_instruction(Ctx.createJump(end_label));
             IRFunc->add_instruction(true_label);
-
-            IRFunc->add_instruction(set_result_to_1);
+            IRFunc->add_instruction(Ctx.createCopy(val_1, result));
             IRFunc->add_instruction(end_label);
         }
 
@@ -770,9 +822,11 @@ ir::Value *IRGenerator::generateBinaryExpression(const BinaryOperator &BinaryOp,
 }
 
 ir::Value *IRGenerator::generatePrefixExpression(const PrefixOperator &PrefixOp, ir::Function *IRFunc) {
-    // Get the variable being operated on
     ir::Value *var = generateExpression(*PrefixOp.getExpr(), IRFunc);
-    auto *one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+    // Get type from the operand (which was already typed by generateVarExpression/etc.)
+    auto *varOp = dynamic_cast<ir::Operand *>(var);
+    ir::Type *ty = (varOp && varOp->getType()) ? varOp->getType() : Ctx.getInt32Ty();
+    auto *one = Ctx.createConstant(ty, 1);
 
     ir::BinaryOp *increment_instruction = nullptr;
 
@@ -798,12 +852,14 @@ ir::Value *IRGenerator::generatePrefixExpression(const PrefixOperator &PrefixOp,
 }
 
 ir::Value *IRGenerator::generatePostfixExpression(const PostfixOperator &PostfixOp, ir::Function *IRFunc) {
-    // Get the variable being operated on
     ir::Value *var = generateExpression(*PostfixOp.getExpr(), IRFunc);
-    auto *one = Ctx.createInt(llvm::APSInt(llvm::APInt(32, 1)));
+    // Get type from the operand (which was already typed by generateVarExpression/etc.)
+    auto *varOp = dynamic_cast<ir::Operand *>(var);
+    ir::Type *ty = (varOp && varOp->getType()) ? varOp->getType() : Ctx.getInt32Ty();
+    auto *one = Ctx.createConstant(ty, 1);
 
     // For postfix operators, we save the old value, update the variable, then return the old value
-    auto *old_value = Ctx.createReg();
+    auto *old_value = Ctx.createReg(ty);
     ir::BinaryOp *increment_instruction = nullptr;
 
     if (IRFunc != nullptr) {
@@ -832,40 +888,63 @@ ir::Value *IRGenerator::generatePostfixExpression(const PostfixOperator &Postfix
 }
 
 ir::Value *IRGenerator::generateConditionalExpression(const ConditionalExpr &cond_expr, ir::Function *IRFunc) {
-    // Results that will be returned
-    ir::Value *Result, *temp1, *temp2;
     // labels
     auto *e2_label = Ctx.getOrCreateLabel("e2_label");
     auto *end_label = Ctx.getOrCreateLabel("end_label");
-    // Result must be a register
-    Result = Ctx.createReg();
+    // Result register carries the expression's type (fall back to i32 if not inferred yet)
+    ir::Type *condTy = cond_expr.getType() ? lowerType(cond_expr.getType()) : Ctx.getInt32Ty();
+    auto *Result = Ctx.createReg(condTy);
 
     // first generate the conditional statement
     auto *cond_result = generateExpression(*cond_expr.getCondition(), IRFunc);
     // If met, jump to the e2
     IRFunc->add_instruction(Ctx.createJZ(cond_result, e2_label));
-    // now we generate the code for the first statement, and obtain
-    // the result
-    temp1 = generateExpression(*cond_expr.getLeft(), IRFunc);
+    // now we generate the code for the first statement, and obtain the result
+    auto *temp1 = generateExpression(*cond_expr.getLeft(), IRFunc);
     IRFunc->add_instruction(Ctx.createMov(temp1, Result));
     IRFunc->add_instruction(Ctx.createJump(end_label));
     // now we generate the second statement
     IRFunc->add_instruction(e2_label);
-    temp2 = generateExpression(*cond_expr.getRight(), IRFunc);
+    auto *temp2 = generateExpression(*cond_expr.getRight(), IRFunc);
     IRFunc->add_instruction(Ctx.createMov(temp2, Result));
     // finally the end label
     IRFunc->add_instruction(end_label);
     return Result;
 }
 
-ir::Value* IRGenerator::generateFunctionCallExpression(const FunctionCallExpr& FuncCallExpr, ir::Function* IRFunc) {
-    std::vector<ir::Operand*> params;
-    for (auto * arg : FuncCallExpr.getArgs()) {
+ir::Value *IRGenerator::generateFunctionCallExpression(const FunctionCallExpr &FuncCallExpr, ir::Function *IRFunc) {
+    std::vector<ir::Operand *> params;
+    for (auto *arg: FuncCallExpr.getArgs()) {
         params.emplace_back(reinterpret_cast<ir::Operand *>(generateExpression(*arg, IRFunc)));
     }
-    auto * invoke = Ctx.createInvoke(FuncCallExpr.getIdentifier(), params);
+    ir::Type *retTy = FuncCallExpr.getType() ? lowerType(FuncCallExpr.getType()) : Ctx.getInt32Ty();
+    auto *invoke = Ctx.createInvoke(FuncCallExpr.getIdentifier(), params, retTy);
     IRFunc->add_instruction(invoke);
     return invoke->getResult();
+}
+
+ir::Value *IRGenerator::generateCastExpression(const CastExpr &CastExpr, ir::Function *IRFunc) {
+    const auto *expr = CastExpr.getCastedExpression();
+    auto *toCastType = CastExpr.getCastedType();
+
+    auto fromRank = BuiltinType::integerRank(llvm::cast<BuiltinType>(expr->getType())->getBuiltinKind());
+    auto toRank = BuiltinType::integerRank(llvm::cast<BuiltinType>(toCastType)->getBuiltinKind());
+
+    auto *src = dynamic_cast<ir::Operand *>(generateExpression(*expr, IRFunc));
+
+    if (toRank == fromRank) {
+        return src; // no-op cast
+    }
+
+    if (toRank > fromRank) {
+        auto *se = Ctx.createSignExtend(src, lowerType(toCastType));
+        IRFunc->add_instruction(se);
+        return se->getResult();
+    } else {
+        auto *tru = Ctx.createTruncate(src, lowerType(toCastType));
+        IRFunc->add_instruction(tru);
+        return tru->getResult();
+    }
 }
 
 void IRGenerator::collectSwitchCases(
@@ -959,7 +1038,7 @@ void IRGenerator::enterScope() {
 
 void IRGenerator::exitScope(const std::vector<std::string> &declaredVars) {
     // Pop variables that were declared in this scope from the rename stack
-    for (const std::string &varName : declaredVars) {
+    for (const std::string &varName: declaredVars) {
         auto it = VariableRenameStack.find(varName);
         if (it != VariableRenameStack.end() && !it->second.empty()) {
             it->second.pop_back();

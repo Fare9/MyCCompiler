@@ -2,11 +2,11 @@
 
 #include "mycc/IR/SimpleIR.hpp"
 #include "mycc/CodeGen/x64/x64AST.hpp"
+#include "mycc/CodeGen/x64/BackendSymTab.hpp"
 #include "llvm/ADT/StringRef.h"
 
 #include <memory>
 #include <string>
-#include <set>
 
 namespace mycc {
 namespace codegen {
@@ -14,7 +14,7 @@ namespace x64 {
 
 class X64CodeGenerator {
     std::unique_ptr<X64Program> Program;
-    std::set<std::string> ExternalFunctions;  // Functions without bodies
+    BackendSymTab SymTab;
     
 public:
     X64CodeGenerator() = default;
@@ -45,6 +45,8 @@ private:
     void generateBinary(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
     void generateDiv(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
     void generateRem(const ir::BinaryOp& BinaryInstr, X64Function* X64Func);
+    void generateSignExtend(const ir::SignExtend& SIgnExtend, X64Function* X64Func);
+    void generateTruncate(const ir::Truncate& TruncInst, X64Function* X64Func);
 
     // For generating calls
     void generateCall(const ir::Invoke& InvokeInstr, X64Function* X64Func);
@@ -52,7 +54,7 @@ private:
     // Operand conversion helpers
     X64Operand* convertOperand(const ir::Value* Val, X64Context& Ctx);
     X64Register* convertRegister(const ir::Reg& Reg, X64Context& Ctx);
-    X64Int* convertInteger(const ir::Int& IntVal, X64Context& Ctx);
+    X64Int* convertConstant(const ir::Constant& ConstVal, X64Context& Ctx);
     X64Register* convertVariable(const ir::VarOp& Var, X64Context& Ctx);
     X64Register* convertParameter(const ir::ParameterOp& Var, X64Context& Ctx);
     X64Data* convertStaticVar(const ir::StaticVarOp& Var, X64Context& Ctx);
@@ -61,11 +63,12 @@ private:
     void allocateStackSlots();
     void allocateStackSlotsForFunction(X64Function* Func);
     void replacePseudoRegistersInInstruction(X64Instruction* Inst, X64Context& Ctx);
-    X64Operand* getOrAllocateStackSlot(unsigned pseudoID, X64Context& Ctx);
+    X64Operand* getOrAllocateStackSlot(PseudoRegister* pseudo, X64Context& Ctx);
     
     // Phase 3: Fix instructions and insert prologue/epilogue
     void fixupInstructions();
     void fixupInstructionsForFunction(X64Function* Func);
+    void fixupLargeImmediates(X64Function* Func);
     void replaceInstructionInFunction(X64Function* Func, X64Instruction* oldInst, 
                                      const std::vector<X64Instruction*>& newInstructions);
     void insertAllocationInstruction(X64Function* Func);

@@ -300,6 +300,11 @@ void Lexer::number(Token &Result) {
         ++End;
     }
 
+    // We start supporting long values, we can find
+    // long integer values
+    if (*End == 'l' || *End == 'L')
+        ++End;
+
     // Check for invalid suffix (like letters after numbers)
     // this would violate C's lexical rules (identifiers can't start
     // with digits, numbers can't contain letters except in scientific notation).

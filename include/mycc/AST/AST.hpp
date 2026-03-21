@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 #include <optional>
-#include <fmt/core.h>
+#include <memory>
 
 #include "AST.hpp"
 
@@ -55,13 +55,23 @@ namespace mycc {
         virtual ~Type() = default;
 
         [[nodiscard]] TypeKind getKind() const { return Kind; }
+
+        virtual std::string to_string() = 0;
+
+        [[nodiscard]] virtual bool equal(const Type &other) const {
+            return Kind == other.Kind;
+        }
     };
 
     /// @brief Represents a built-in primitive type (e.g. `int`, `void`).
     class BuiltinType : public Type {
     public:
         enum BuiltinKind {
+            Bool,
+            Char,
+            Short,
             Int,
+            Long,
             Void,
             // For the moment, we can include in the future more
         };
@@ -76,8 +86,100 @@ namespace mycc {
 
         [[nodiscard]] BuiltinKind getBuiltinKind() const { return BuiltinK; }
 
+        /// Returns the integer conversion rank for a builtin kind.
+        /// Returns -1 for non-integer types (e.g. Void) so callers can detect errors.
+        static int integerRank(BuiltinType::BuiltinKind K) {
+            switch (K) {
+                case BuiltinType::Bool: return 0;
+                case BuiltinType::Char: return 1;
+                case BuiltinType::Short: return 2;
+                case BuiltinType::Int: return 3;
+                case BuiltinType::Long: return 4;
+                default: return -1; // Void or unknown — not promotable
+            }
+        }
+
+        [[nodiscard]] bool isIntegerType() const { return integerRank(BuiltinK) >= 0; }
+        [[nodiscard]] bool isVoid() const { return BuiltinK == Void; }
+
+        std::string to_string() override {
+            switch (BuiltinK) {
+                case Bool:
+                    return "bool";
+                case Char:
+                    return "char";
+                case Short:
+                    return "short";
+                case Int:
+                    return "int";
+                case Long:
+                    return "long";
+                case Void:
+                    return "void";
+                default:
+                    return "";
+            }
+        }
+
+        [[nodiscard]] bool equal(const Type &other) const override {
+            if (other.getKind() != TK_Builtin) return false;
+            return BuiltinK == llvm::cast<BuiltinType>(&other)->getBuiltinKind();
+        }
+
         static bool classof(const Type *T) {
             return T->getKind() == TK_Builtin;
+        }
+    };
+
+    /// @brief Represents a Function type, it contains return types, and argument types.
+    class FunctionType : public Type {
+        std::string funcTypeStr;
+        Type *retType;
+        std::vector<Type*> argType;
+
+    public:
+        FunctionType(Type *retType, std::vector<Type*> argType) : Type(TK_Function),
+            retType(retType), argType(std::move(argType)) {
+        }
+
+        ~FunctionType() override = default;
+
+        /// @return reference to the return type
+        [[nodiscard]] Type *getReturnType() const {
+            return retType;
+        }
+
+        /// @return reference to the vector with the argument types
+        [[nodiscard]] const std::vector<Type*> &getArgTypes() const {
+            return argType;
+        }
+
+        std::string to_string() override {
+            if (!funcTypeStr.empty())
+                return funcTypeStr;
+            funcTypeStr += retType->to_string() + " ";
+            funcTypeStr += "(";
+            for (auto *arg : argType) {
+                funcTypeStr += arg->to_string() + ",";
+            }
+            if (!argType.empty())
+                funcTypeStr.pop_back();
+            funcTypeStr += ")";
+            return funcTypeStr;
+        }
+
+        [[nodiscard]] bool equal(const Type &other) const override {
+            if (other.getKind() != TK_Function) return false;
+            const auto &ft = *llvm::cast<FunctionType>(&other);
+            if (!retType->equal(*ft.getReturnType())) return false;
+            if (argType.size() != ft.getArgTypes().size()) return false;
+            for (size_t i = 0; i < argType.size(); ++i)
+                if (!argType[i]->equal(*ft.getArgTypes()[i])) return false;
+            return true;
+        }
+
+        static bool classof(const Type *T) {
+            return T->getKind() == TK_Function;
         }
     };
 
@@ -124,6 +226,7 @@ namespace mycc {
     public:
         enum ExprKind {
             Ek_Int,
+            Ek_Long,
             Ek_Var,
             Ek_UnaryOperator,
             Ek_BinaryOperator,
@@ -132,13 +235,21 @@ namespace mycc {
             Ek_PostfixOperator,
             Ek_ConditionalOperator,
             Ek_FunctionCallOperator,
+            Ek_Cast,
+            Ek_IntInit,   // compile-time int constant for static storage (may be truncated)
+            Ek_LongInit,  // compile-time long constant for static storage
         };
 
     private:
         const ExprKind Kind;
+        Type* varType = nullptr;
 
     protected:
         explicit Expr(ExprKind Kind) : Kind(Kind) {
+        }
+
+        Expr(ExprKind Kind, Type* varType) :
+            Kind(Kind), varType(varType) {
         }
 
     public:
@@ -146,6 +257,14 @@ namespace mycc {
 
         [[nodiscard]] ExprKind getKind() const {
             return Kind;
+        }
+
+        void setType(Type* vtype) {
+            this->varType = vtype;
+        }
+
+        [[nodiscard]] Type* getType() const {
+            return varType;
         }
     };
 
@@ -281,7 +400,7 @@ namespace mycc {
         StringRef Label;
 
     public:
-        LabelStatement(StringRef Label) : Statement(SK_Label), Label(Label) {
+        explicit LabelStatement(const StringRef Label) : Statement(SK_Label), Label(Label) {
         }
 
         ~LabelStatement() override = default;
@@ -364,7 +483,6 @@ namespace mycc {
 
     /// @brief AST node for a `while (condition) body` loop.
     class WhileStatement : public Statement {
-    private:
         // condition inside of while statement
         Expr *Condition;
         // Body of the while condition
@@ -495,6 +613,10 @@ namespace mycc {
         }
 
         [[nodiscard]] Expr *getValue() const { return Value; }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Case;
+        }
     };
 
     /// @brief AST node for a `default:` label inside a switch statement.
@@ -512,6 +634,10 @@ namespace mycc {
 
         [[nodiscard]] std::string_view get_label() const {
             return label;
+        }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Default;
         }
     };
 
@@ -539,6 +665,10 @@ namespace mycc {
 
         [[nodiscard]] std::string_view get_break_label() const {
             return this->break_label;
+        }
+
+        static bool classof(const Statement *S) {
+            return S->getKind() == SK_Switch;
         }
     };
 
@@ -575,6 +705,53 @@ namespace mycc {
         static bool classof(const Expr *E) {
             return E->getKind() == Ek_Int;
         }
+    };
+
+    /// @brief AST node for a long literal constant (e.g. '1000L').
+    class LongLiteral : public Expr {
+        SMLoc Loc;
+        llvm::APSInt Value;
+    public:
+        LongLiteral(SMLoc Loc, llvm::APSInt Value) : Expr(Ek_Long), Loc(Loc), Value(std::move(Value)) {
+        }
+
+        llvm::APSInt &getValue() {
+            return Value;
+        }
+
+        [[nodiscard]] const llvm::APSInt &getValue() const {
+            return Value;
+        }
+
+        static bool classof(const Expr *E) {
+            return E->getKind() == Ek_Long;
+        }
+    };
+
+    /// @brief Compile-time int initializer for static storage duration variables.
+    /// Carries a value already truncated to 32-bit int range.
+    /// Used instead of CastExpr so IRGen can emit a constant directly.
+    class IntInit : public Expr {
+        int32_t Value;
+    public:
+        explicit IntInit(int32_t Value) : Expr(Ek_IntInit), Value(Value) {}
+
+        [[nodiscard]] int32_t getValue() const { return Value; }
+
+        static bool classof(const Expr *E) { return E->getKind() == Ek_IntInit; }
+    };
+
+    /// @brief Compile-time long initializer for static storage duration variables.
+    /// Carries a value already extended to 64-bit long range.
+    /// Used instead of CastExpr so IRGen can emit a constant directly.
+    class LongInit : public Expr {
+        int64_t Value;
+    public:
+        explicit LongInit(int64_t Value) : Expr(Ek_LongInit), Value(Value) {}
+
+        [[nodiscard]] int64_t getValue() const { return Value; }
+
+        static bool classof(const Expr *E) { return E->getKind() == Ek_LongInit; }
     };
 
     /// @brief AST node for a variable reference expression (an identifier
@@ -723,11 +900,11 @@ namespace mycc {
 
         ~AssignmentOperator() override = default;
 
-        Expr *getLeft() const {
+        [[nodiscard]] Expr *getLeft() const {
             return left;
         }
 
-        Expr *getRight() const {
+        [[nodiscard]] Expr *getRight() const {
             return right;
         }
 
@@ -873,6 +1050,30 @@ namespace mycc {
         }
     };
 
+    /// @brief AST node for the cast expression ('(int) expr').
+    class CastExpr : public Expr {
+        SMLoc Loc;
+        Expr *expr; // the expression that will be cast to
+        Type *castType;
+    public:
+        CastExpr(Expr *expr, Type *castType) :
+            Expr(Ek_Cast), expr(expr), castType(castType) {}
+
+        ~CastExpr() override = default;
+
+        [[nodiscard]] const Expr *getCastedExpression() const {
+            return expr;
+        }
+
+        [[nodiscard]] Type *getCastedType() const {
+            return castType;
+        }
+
+        static bool classof(const Expr *E) {
+            return E->getKind() == Ek_Cast;
+        }
+    };
+
     using ArgsList = std::vector<Var *>;
 
     /// @brief AST node for a variable declaration, with optional initializer
@@ -884,6 +1085,8 @@ namespace mycc {
         // In a declaration, an expression can be null
         Expr *expr = nullptr;
         std::optional<StorageClass> storageClass;
+        // Type associated to the declared variable.
+        Type* varType;
         // For static local variables, stores the unique global name (e.g., "func.var.1")
         std::optional<std::string> uniqueName;
 
@@ -896,6 +1099,10 @@ namespace mycc {
 
         VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass)
             : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass) {
+        }
+
+        VarDeclaration(const SMLoc Loc, Var *Name, Expr *expr, std::optional<StorageClass> storageClass, Type* varType)
+            : Loc(Loc), Name(Name), expr(expr), storageClass(storageClass), varType(varType) {
         }
 
         ~VarDeclaration() = default;
@@ -920,12 +1127,20 @@ namespace mycc {
             storageClass = sc;
         }
 
-        [[nodiscard]] const std::optional<std::string>& getUniqueName() const {
+        [[nodiscard]] const std::optional<std::string> &getUniqueName() const {
             return uniqueName;
         }
 
-        void setUniqueName(const std::string& name) {
+        void setUniqueName(const std::string &name) {
             uniqueName = name;
+        }
+
+        [[nodiscard]] Type *getType() const {
+            return varType;
+        }
+
+        void setType(Type* type) {
+            varType = type;
         }
     };
 
@@ -938,15 +1153,23 @@ namespace mycc {
         ArgsList args;
         bool IsDefinition = false; // True if function has a body (even if empty)
         BlockItems body;
+        // Type of the function that contains the return
+        // type, and the parameters
+        FunctionType* funcType;
         std::optional<StorageClass> storageClass;
+
 
     public:
         FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args)
             : Loc(Loc), Name(Name), args(std::move(args)) {
         }
 
-        FunctionDeclaration(StringRef Name, SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass)
             : Loc(Loc), Name(Name), args(std::move(args)), storageClass(storageClass) {
+        }
+
+        FunctionDeclaration(const StringRef Name, const SMLoc Loc, ArgsList args, std::optional<StorageClass> storageClass, FunctionType* funcType)
+            : Loc(Loc), Name(Name), args(std::move(args)), funcType(funcType), storageClass(storageClass) {
         }
 
         ~FunctionDeclaration() = default;
@@ -980,7 +1203,8 @@ namespace mycc {
             body.emplace_back(s);
         }
 
-        Var *getArg(size_t i) {
+        [[nodiscard]] Var *getArg(const size_t i) const
+        {
             return i >= args.size() ? nullptr : args.at(i);
         }
 
@@ -1023,6 +1247,14 @@ namespace mycc {
         /// Returns true if the function has external linkage (is NOT static)
         [[nodiscard]] bool isGlobal() const {
             return !storageClass.has_value() || storageClass.value() != StorageClass::SC_Static;
+        }
+
+        void setFunctionType(FunctionType* type) {
+            funcType = type;
+        }
+
+        [[nodiscard]] FunctionType *getFunctionType() const {
+            return funcType;
         }
     };
 

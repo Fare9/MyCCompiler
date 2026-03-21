@@ -31,6 +31,11 @@ std::string ASTPrinter::print(const FunctionDeclaration* function, int indent) {
 
     std::string output = getIndent(indent) + "Function: " + function->getName().str() + "\n";
 
+    // Print function type
+    if (const auto *ft = function->getFunctionType()) {
+        output += getIndent(indent + 1) + "Type: " + const_cast<FunctionType *>(ft)->to_string() + "\n";
+    }
+
     // Print parameters
     const auto& args = function->getArgs();
     if (!args.empty()) {
@@ -116,6 +121,8 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
     switch (expr->getKind()) {
         case Expr::Ek_Int:
             return printIntegerLiteral(dynamic_cast<const IntegerLiteral*>(expr), indent);
+        case Expr::Ek_Long:
+            return printLongLiteral(dynamic_cast<const LongLiteral*>(expr), indent);
         case Expr::Ek_Var:
             return printVar(dynamic_cast<const Var*>(expr), indent);
         case Expr::Ek_UnaryOperator:
@@ -132,6 +139,12 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
             return printConditionalExpr(dynamic_cast<const ConditionalExpr*>(expr), indent);
         case Expr::Ek_FunctionCallOperator:
             return printFunctionCallExpr(dynamic_cast<const FunctionCallExpr*>(expr), indent);
+        case Expr::Ek_Cast:
+            return printCastExpr(dynamic_cast<const CastExpr*>(expr), indent);
+        case Expr::Ek_IntInit:
+            return printIntInit(dynamic_cast<const IntInit*>(expr), indent);
+        case Expr::Ek_LongInit:
+            return printLongInit(dynamic_cast<const LongInit*>(expr), indent);
     }
     return getIndent(indent) + "Unknown Expression\n";
 }
@@ -146,6 +159,18 @@ std::string ASTPrinter::printReturnStatement(const ReturnStatement* stmt, int in
 
 std::string ASTPrinter::printIntegerLiteral(const IntegerLiteral* expr, int indent) {
     return getIndent(indent) + "IntegerLiteral: " + std::to_string(expr->getValue().getSExtValue()) + "\n";
+}
+
+std::string ASTPrinter::printLongLiteral(const LongLiteral* expr, int indent) {
+    return getIndent(indent) + "LongLiteral: " + std::to_string(expr->getValue().getSExtValue()) + "\n";
+}
+
+std::string ASTPrinter::printIntInit(const IntInit* expr, int indent) {
+    return getIndent(indent) + "IntInit: " + std::to_string(expr->getValue()) + "\n";
+}
+
+std::string ASTPrinter::printLongInit(const LongInit* expr, int indent) {
+    return getIndent(indent) + "LongInit: " + std::to_string(expr->getValue()) + "\n";
 }
 
 std::string ASTPrinter::printUnaryOperator(const UnaryOperator* expr, int indent) {
@@ -264,7 +289,7 @@ std::string ASTPrinter::printNullStatement(const NullStatement* stmt, int indent
 }
 
 std::string ASTPrinter::printVar(const Var* expr, int indent) {
-    return getIndent(indent) + "Var: " + expr->getName().str() + "\n";
+    return getIndent(indent) + "Var: " + expr->getName().str() + "\n" + getIndent(indent + 1) + "Type: " + expr->getType()->to_string()  + "\n";
 }
 
 std::string ASTPrinter::printAssignmentOperator(const AssignmentOperator* expr, int indent) {
@@ -312,6 +337,9 @@ std::string ASTPrinter::printDeclaration(const VarDeclaration* decl, int indent)
     std::string output = getIndent(indent) + "Declaration\n";
     output += getIndent(indent + 1) + "Name:\n";
     output += printVar(decl->getVar(), indent + 2);
+    if (const auto *t = decl->getType()) {
+        output += getIndent(indent + 1) + "Type: " + const_cast<Type *>(t)->to_string() + "\n";
+    }
     if (decl->getExpr()) {
         output += getIndent(indent + 1) + "Initializer:\n";
         output += print(decl->getExpr(), indent + 2);
@@ -559,6 +587,14 @@ std::string ASTPrinter::printFunctionCallExpr(const FunctionCallExpr* expr, int 
         output += getIndent(indent + 1) + "Arguments: (none)\n";
     }
 
+    return output;
+}
+
+std::string ASTPrinter::printCastExpr(const CastExpr* expr, int indent) {
+    const auto *t = expr->getCastedType();
+    std::string typeStr = t ? const_cast<Type *>(t)->to_string() : "?";
+    std::string output = getIndent(indent) + "CastExpr: (" + typeStr + ")\n";
+    output += print(expr->getCastedExpression(), indent + 1);
     return output;
 }
 
