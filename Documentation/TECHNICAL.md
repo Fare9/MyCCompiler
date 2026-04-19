@@ -2,214 +2,611 @@
 
 ## Compiler Architecture Overview
 
-MyCCompiler implements a traditional multi-pass compiler architecture with four distinct phases: lexical analysis, syntactic analysis, semantic analysis, and code generation. The design emphasizes modularity and maintainability through clear separation of concerns between compilation phases.
+MyCCompiler implements a traditional multi-pass compiler architecture based on
+the book "Writing a C Compiler" by Nora Sandler. The pipeline transforms C
+source code through several intermediate representations before producing either
+x86-64 assembly or LLVM IR.
+
+```
+Source (.c)
+    │
+    ▼
+┌──────────┐
+│  Lexer   │  Tokenises characters into a stream of Token objects.
+└──────────┘
+    │  token stream
+    ▼
+┌──────────┐
+│  Parser  │  Recursive-descent + Pratt precedence. Calls Sema action functions.
+└──────────┘
+    │  AST (Program / FunctionDeclaration / Statement / Expr)
+    ▼
+┌──────────┐
+│   Sema   │  Validates semantics, resolves names, assigns types, generates labels.
+└──────────┘
+    │  annotated AST + GlobalSymbolTable
+    ▼
+┌──────────────┐     ┌────────────────┐
+│  IRGenerator │     │ LLVMIRGenerator│  (alternative backend, --llvm flag)
+└──────────────┘     └────────────────┘
+    │  SimpleIR (ir::Program)
+    ▼
+┌──────────────┐
+│ X64CodeGen   │  Three-phase: translate → register alloc → fixup → emit
+└──────────────┘
+    │  Intel-syntax assembly (.s)
+```
+
+---
 
 ## Frontend Components
 
-### Lexical Analyzer
+### Lexical Analyzer (`include/mycc/Lexer/`, `lib/Lexer/`)
 
-The lexical analyzer (`Lexer`) transforms raw source text into a sequence of tokens. The implementation utilizes LLVM's `StringRef` for efficient string handling and `SMLoc` for precise source location tracking. Token categories include:
+The `Lexer` converts raw source bytes into a flat sequence of `Token` objects.
 
-- **Identifiers**: Variable and function names
-- **Keywords**: C language reserved words (`int`, `return`, `if`, etc.)
-- **Operators**: Arithmetic, logical, and assignment operators
-- **Literals**: Integer constants
-- **Delimiters**: Parentheses, braces, semicolons
+- Source locations use `llvm::SMLoc` and are attached to every token.
+- String content is handled via `llvm::StringRef` (zero-copy view into the
+  source buffer).
+- Token categories are defined in `Basic/TokenKinds.def` using an X-macro,
+  which both generates the `TokenKind` enum and the textual name lookup.
+- Recognised token classes: identifiers, keywords, integer literals (decimal,
+  octal, hex, with optional `L`/`l` suffix), all C operators, and delimiters.
 
-### Parser
+### Parser (`include/mycc/Parser/`, `lib/Parser/`)
 
-The parser implements a recursive descent parsing strategy with operator precedence parsing for expressions. The implementation constructs an Abstract Syntax Tree (AST) from the token stream with support for:
+The parser implements recursive descent with Pratt-style precedence climbing
+for expressions. It does not build the AST directly — instead it calls *action
+methods* on the `Sema` object, which validates and constructs each node.
 
-- **Declarations**: Variable declarations with optional initialization expressions
-- **Expressions**:
-  - Primary expressions (integer literals, identifiers, parenthesized expressions)
-  - Unary operations (negation, bitwise complement, logical not)
-  - Binary operations with precedence (arithmetic, bitwise, relational, logical)
-  - Ternary conditional operator (condition ? true_expr : false_expr)
-  - Assignment expressions with compound assignment operators
-  - Prefix and postfix increment/decrement operators
-- **Statements**:
-  - Expression statements
-  - Return statements
-  - Null statements (empty semicolon)
-  - Compound statements (blocks with declarations and statements)
-  - Conditional statements (if/else)
-  - Loop statements (while, do-while, for with optional init/condition/post)
-  - Jump statements (break, continue, goto)
-  - Labeled statements (identifier labels, case labels, default label)
-  - Switch statements with case/default labels
-- **Functions**: Function definitions with block-scoped statement sequences
+Supported grammar productions:
 
-### Abstract Syntax Tree
+**Declarations**
+- Variable declarations with optional initialiser and optional storage class
+  (`static`, `extern`)
+- Function declarations and definitions with typed parameters
+- File-scope (global) and block-scope declarations
 
-The AST implementation provides a hierarchical representation of the program structure with the following node types:
+**Expressions** (in precedence order, lowest to highest)
+- Ternary conditional (`?:`)
+- Logical or/and (`||`, `&&`)
+- Bitwise or/xor/and (`|`, `^`, `&`)
+- Equality/relational (`==`, `!=`, `<`, `<=`, `>`, `>=`)
+- Shifts (`<<`, `>>`)
+- Additive / multiplicative (`+`, `-`, `*`, `/`, `%`)
+- Unary (`-`, `~`, `!`)
+- Prefix increment/decrement (`++x`, `--x`)
+- Postfix increment/decrement (`x++`, `x--`)
+- Explicit cast (`(type) expr`)
+- Function call (`f(args...)`)
+- Primary (integer literal, identifier, parenthesised expression)
 
-#### Expression Nodes
-- `IntegerLiteral`: Represents integer constants using LLVM's `APSInt` for arbitrary precision
-- `Var`: Variable references containing identifier names
-- `UnaryOperator`: Unary operations (negation, complement, logical not)
-- `BinaryOperator`: Binary operations including arithmetic, comparison, and logical operations
-- `AssignmentOperator`: Assignment expressions with left-hand and right-hand operands
+**Statements**
+- Return, expression, null (`;`)
+- Compound (`{ ... }`)
+- If / if-else
+- While, do-while, for (init may be a declaration or expression)
+- Break, continue
+- Goto, labeled statement
+- Switch with case and default labels
 
-#### Statement Nodes
-- `ReturnStatement`: Function return statements with optional return values
-- `ExpressionStatement`: Expression evaluations
-- `NullStatement`: Empty statements
+### Abstract Syntax Tree (`include/mycc/AST/`)
+
+All AST node classes are declared in `AST.hpp`. Every node family uses an
+integer discriminator for LLVM-style RTTI (`classof` / `llvm::cast<>`).
+
+#### Type Hierarchy
+
+```
+Type  (TK_Builtin, TK_Pointer, TK_Function)
+├── BuiltinType   (Bool, Char, Short, Int, Long, Void)
+│     · integerRank() returns conversion rank for implicit promotion
+│     · isIntegerType() / isVoid() convenience predicates
+├── PointerType   (TK_Pointer — declared but not yet implemented)
+└── FunctionType  (return type + param types, equality, to_string caching)
+```
+
+#### Expression Hierarchy
+
+```
+Expr  (ExprKind enum)
+├── IntegerLiteral   (APSInt, 32-bit)
+├── LongLiteral      (APSInt, 64-bit)
+├── IntInit          (compile-time int32 for static initialisers)
+├── LongInit         (compile-time int64 for static initialisers)
+├── Var              (identifier reference)
+├── UnaryOperator    (Complement, Negate, Not)
+├── BinaryOperator   (arithmetic, bitwise, relational, logical)
+├── AssignmentOperator
+├── PrefixOperator   (PreIncrement, PreDecrement)
+├── PostfixOperator  (PostIncrement, PostDecrement)
+├── ConditionalExpr  (ternary)
+├── FunctionCallExpr
+└── CastExpr
+```
+
+`IntInit` and `LongInit` are special nodes that carry a compile-time constant
+already sized to the target type. They are created by `Sema::actOnStaticInit`
+for static variable initialisers so that IRGen can emit them as constants
+without re-evaluating.
+
+#### Statement Hierarchy
+
+```
+Statement  (StmtKind enum)
+├── ReturnStatement
+├── ExpressionStatement
+├── NullStatement
+├── CompoundStatement   (holds BlockItems — variant of Stmt/VarDecl/FuncDecl)
+├── IfStatement         (condition + then + optional else)
+├── WhileStatement      (condition + body + compiler-assigned label)
+├── DoWhileStatement    (body + condition + label)
+├── ForStatement        (ForInit variant + optional condition + optional post + body + label)
+├── BreakStatement      (compiler-assigned label set by Sema)
+├── ContinueStatement   (compiler-assigned label set by Sema)
+├── LabelStatement      (user label for goto)
+├── GotoStatement
+├── CaseStatement       (value + compiler-assigned label)
+├── DefaultStatement    (compiler-assigned label)
+└── SwitchStatement     (condition + body + break label)
+```
 
 #### Declaration Nodes
-- `Declaration`: Variable declarations with optional initializer expressions
 
-#### Program Structure
-- `Function`: Function definitions containing statement sequences
-- `Program`: Top-level container for function definitions
+```
+VarDeclaration
+  · Var*                 — name (original source name, not renamed)
+  · Expr*                — optional initialiser
+  · optional<StorageClass>
+  · Type*
+  · optional<string>     — unique global name for static locals ("func.var")
 
-### Semantic Analysis
+FunctionDeclaration
+  · StringRef Name
+  · ArgsList             — vector of Var*
+  · BlockItems body      — empty if declaration-only
+  · FunctionType*
+  · optional<StorageClass>
+  · bool IsDefinition
 
-The semantic analyzer performs scope resolution and type checking. The `Scope` class maintains symbol tables for variable declarations, while the `Sema` component validates semantic correctness including:
+Program
+  · DeclarationList      — variant of FunctionDeclaration* / VarDeclaration*
+```
 
-- Variable declaration and usage validation
-- Scope-based name resolution
-- Type compatibility checking
+#### Memory Management — `ASTContext`
 
-## Intermediate Representation
+`ASTContext` owns all AST nodes via `std::deque<std::unique_ptr<T>>` (one
+deque per node category). `std::deque` guarantees pointer stability: addresses
+never move on append, so raw pointers stored elsewhere remain valid.
 
-### SimpleIR Design
+Factory methods (`createStatement<T>`, `createExpression<T>`, etc.) follow a
+uniform pattern:
 
-The compiler employs a custom intermediate representation (SimpleIR) that abstracts away source-level constructs while maintaining semantic information necessary for code generation. The IR operates on a value-based system with the following components:
+```cpp
+template<typename T, typename... Args>
+T* createExpression(Args&&... args) {
+    auto node = std::make_unique<T>(std::forward<Args>(args)...);
+    T* ptr = node.get();
+    Expressions.emplace_back(std::move(node));
+    return ptr;
+}
+```
 
-#### Value Hierarchy
-- **`Value`**: Base class for all IR values with string representation capability
-- **`Operand`**: Base class for values that can be used as instruction operands
-- **`Instruction`**: Base class for computational operations, inheriting from `Value`
+Canonical built-in types (`Int`, `Long`, `Void`) are pre-created and returned
+by `getIntTy()`, `getLongTy()`, `getVoidTy()` to avoid duplicates.
 
-#### Operand Types
-- **`Int`**: Integer constants represented using LLVM's `APSInt`
-- **`Reg`**: Temporary registers with unique numeric identifiers
-- **`VarOp`**: Named variables for user-declared identifiers
+---
 
-#### Instruction Types
+## Semantic Analysis (`include/mycc/Sema/`)
 
-**Data Movement**
-- `Copy`: Copies values between operands (variables and temporaries)
-- `Mov`: Generic move operations
+### Overview
 
-**Arithmetic Operations**
-- `UnaryOp`: Unary operations (negation, bitwise complement, logical not)
-- `BinaryOp`: Binary arithmetic (add, subtract, multiply, divide, modulo)
-- `ICmpOp`: Integer comparison operations (less than, equal, etc.)
+The `Sema` class is the semantic analysis engine. The parser calls `actOn*`
+methods instead of constructing nodes directly, so `Sema` intercepts every
+declaration and expression.
 
-**Control Flow**
-- `Label`: Jump targets for control flow
-- `Jump`: Unconditional jumps to labels
-- `JumpIfZero`: Conditional jumps when operand equals zero
-- `JumpIfNotZero`: Conditional jumps when operand is non-zero
-- `Ret`: Function return with optional return value
+Major responsibilities:
+- Name resolution and uniqueness checking
+- Linkage computation for `static` / `extern` declarations
+- Type annotation on every `Expr` node
+- Compiler-assigned label generation for loops, switch, break/continue
+- Goto label validation (all targets must be defined in the same function)
 
-#### Context Management
+### Scope and Symbol Table
 
-The `Context` class manages IR value creation and lifetime through factory methods, ensuring proper memory management and value uniqueness. It maintains:
+The `Scope` class is a linked list of symbol tables:
 
-- **Variable registry**: Maps variable names to `VarOp` instances
-- **Constant pool**: Deduplicates integer constants
-- **Register allocation**: Assigns unique identifiers to temporary registers
-- **Memory management**: Automatic cleanup of all created values
+```
+CurrentScope  →  parent  →  ...  →  file-scope  →  nullptr
+```
 
-### IR Generation Process
+Each `Scope` holds a `StringMap<SymbolEntry>`. `SymbolEntry` stores:
 
-The `IRGenerator` transforms AST nodes into SimpleIR through visitor-pattern traversal:
+```
+SymbolEntry {
+    variant<FunctionDeclaration*, VarDeclaration*>  decl;
+    variant<FunAttr, StaticAttr, LocalAttr>         attrs;
+}
+```
 
-1. **Expression Translation**: Converts AST expressions into IR values, creating temporary registers for intermediate results
-2. **Statement Processing**: Transforms control flow constructs into appropriate IR instruction sequences
-3. **Short-Circuit Evaluation**: Implements lazy evaluation for logical operators using conditional jumps
+Type-safe lookup methods (`lookupForVar`, `lookupForFunction`,
+`lookupEntry`) traverse the chain and check `std::holds_alternative` before
+extracting a value, so variables and functions with the same name in the same
+scope chain are correctly distinguished.
 
-## Backend: x86-64 Code Generation
+### Global Symbol Table
 
-### X64AST Intermediate Layer
+`Sema` maintains two separate symbol-table roots:
 
-The x86-64 backend introduces an intermediate representation (X64AST) that models target-specific constructs while maintaining abstraction from actual assembly syntax.
+| Table | Purpose |
+|-------|---------|
+| `CurrentScope` chain | Scope-aware name visibility during parsing |
+| `GlobalSymbolTable` | Flat table of all names that IRGen needs to emit globally |
 
-#### Operand Modeling
-- **`X64Int`**: Immediate integer values
-- **`PseudoRegister`**: Virtual registers with numeric identifiers
-- **`PhysicalRegister`**: Actual x86-64 registers with size specifications
-- **`X64Stack`**: Stack memory locations with offset calculations
+The `GlobalSymbolTable` collects:
+- All file-scope functions and variables (under their original names)
+- All block-scope `static` variables (under the unique name `functionName.varName`)
 
-#### Instruction Modeling
-- **`X64Mov`**: Data movement between operands
-- **`X64Binary`**: Two-operand arithmetic operations
-- **`X64Unary`**: Single-operand operations
-- **`X64Cmp`**: Comparison operations setting flags
-- **`X64JmpCC`**: Conditional jumps based on flag states
-- **`X64IDiv`**: Division operations with implicit register usage
+IRGen receives a const reference to `GlobalSymbolTable` and uses it to:
+1. Emit `ir::StaticVariable` entries for all static-duration symbols.
+2. Distinguish local stack variables from static globals when lowering `Var`
+   expressions.
 
-### Code Generation Pipeline
+### Linkage Computation
 
-The x86-64 code generator implements a multi-phase approach:
+```
+Linkage computeLinkage(optional<StorageClass> sc, ScopeType scope):
 
-#### Phase 1: IR to X64AST Translation
-Converts SimpleIR instructions to X64AST nodes while performing operand conversion:
-- Integer constants map directly to `X64Int`
-- IR registers become `PseudoRegister` instances
-- Variables (VarOp) convert to pseudo registers using name hashing for consistency
+  File scope:
+    SC_Static  → Linkage::Static   (internal linkage)
+    otherwise  → Linkage::External
 
-#### Phase 2: Register Allocation
-Implements a simple stack-based allocation strategy:
-- All pseudo registers receive stack slot allocations
-- Stack slots are allocated with appropriate size (DWORD for integers)
-- Memory layout uses RBP-relative addressing with negative offsets
+  Block scope:
+    SC_Extern  → Linkage::External
+    otherwise  → Linkage::None
+```
+
+### Identifier Attributes
+
+| Attribute | Used For |
+|-----------|---------|
+| `FunAttr{defined, global}` | Function declarations |
+| `StaticAttr{init, value, global}` | Global vars, static locals |
+| `LocalAttr{}` | Automatic local variables |
+
+`InitialValue` tracks three states for static-duration variables:
+- `Tentative` — no initialiser, will be zero-initialised
+- `Initial` — explicit constant initialiser
+- `NoInitializer` — `extern` declaration; defined in another translation unit
+
+### Sub-Analyses
+
+Semantic analysis is decomposed into focused passes within `Sema/Analyses/`:
+
+| Class | Responsibility |
+|-------|---------------|
+| `LabelGenerator` | Generates unique compiler labels for loops, cases, switch breaks |
+| `LoopLabelAssigner` | Walks `FunctionDeclaration` and attaches compiler labels to loops |
+| `GotoLabelValidator` | Tracks user labels and goto targets; reports undeclared targets |
+| `TypeExpressionInference` | Walks expression trees and annotates each `Expr` with its type |
+| `BreakableContext` | Tracks whether break/continue are inside a loop or switch |
+
+`EnterDeclScope` is an RAII helper that calls `enterScope()` on construction
+and `exitScope()` on destruction, ensuring correct cleanup in all parser paths.
+
+### Type System and Implicit Conversions
+
+`TypeExpressionInference` applies integer promotions and usual arithmetic
+conversions according to the C standard:
+
+- Unary operators on integer types retain the operand's type.
+- Binary operators promote operands to the common type (higher rank wins).
+- Assignments coerce the RHS to the LHS type, inserting `CastExpr` nodes.
+- Explicit casts (`(type)expr`) are represented as `CastExpr`.
+
+Coercion is performed by `Sema::coerce(Loc, expr, targetType)`, which wraps
+the expression in a `CastExpr` if the types differ.
+
+---
+
+## Intermediate Representation (`include/mycc/IR/SimpleIR.hpp`)
+
+SimpleIR is a flat, register-based IR with explicit control-flow labels. It
+lives entirely in a single header.
+
+### Type System
+
+```
+ir::Type  (TK_Int, TK_Void, TK_Function)
+├── IntType   (bit width: 8, 16, 32, 64)
+├── VoidType
+└── FunctionType  (return type + param types)
+```
+
+Signedness is NOT encoded in the type (matching LLVM's convention). Signed vs.
+unsigned is expressed in the instruction (`sext` vs `zext`, signed vs
+unsigned div/rem — not yet fully implemented).
+
+### Value Hierarchy
+
+```
+Value
+├── Instruction
+│   ├── Copy          (dst = src — named variable copy)
+│   ├── Mov           (generic move)
+│   ├── Ret           (void or value return)
+│   ├── Jump          (unconditional branch)
+│   ├── JumpIfZero    (conditional branch on zero)
+│   ├── JumpIfNotZero (conditional branch on non-zero)
+│   ├── Label         (branch target)
+│   ├── UnaryOp       (Neg, Complement, Not)
+│   ├── BinaryOp      (Add, Sub, Mul, Div, Rem, And, Or, Xor, Sal, Sar)
+│   ├── ICmpOp        (lt, le, gt, ge, eq, neq)
+│   ├── Invoke        (function call, optional result register)
+│   ├── SignExtend    (sext i32 to i64)
+│   └── Truncate      (trunc i64 to i32)
+└── Operand
+    ├── Constant      (int64_t with associated IntType)
+    ├── Reg           (anonymous temporary, unique numeric ID)
+    ├── VarOp         (named local variable)
+    ├── StaticVarOp   (named static/global variable)
+    └── ParameterOp   (named function parameter)
+```
+
+### Context and Memory Ownership
+
+`ir::Context` owns all IR values via `std::deque<std::unique_ptr<Value>>`.
+It also interns types and constants:
+- `IntType` instances are interned by bit-width (one per width).
+- `Constant` values are interned by `int32_t` key (for ≤32-bit) or `int64_t`
+  key (for 64-bit), avoiding duplicate constant nodes.
+- Registers receive monotonically increasing IDs from `NextRegID`.
+
+Factory methods (`createReg`, `createCopy`, `createBinaryOp`, etc.) allocate,
+store, and return a raw pointer. Callers do not own the returned pointer.
+
+---
+
+## IR Generation (`include/mycc/CodeGen/IRGen.hpp`)
+
+`IRGenerator` lowers the annotated AST to SimpleIR.
+
+### Variable Renaming (SSA-style)
+
+At IR-generation time, each local variable declaration receives a unique name:
+
+```
+original name: "foo"   →   IR name: "foo_0", "foo_1", ...
+```
+
+A `VariableRenameStack` (a `StringMap<vector<string>>`) tracks the current
+IR name for each original name. On scope entry, new declarations push a new
+name. On scope exit, they pop it, restoring the visible name for any
+outer declaration with the same original name.
+
+This correctly handles shadowing:
+
+```c
+int x = 1;         // IR: "x_0"
+{
+    int x = 2;     // IR: "x_1"  — shadows x_0
+}
+// Back to "x_0" here
+```
+
+Static variables and extern references skip the rename stack and use their
+global names directly.
+
+### Static Variable Emission
+
+`convertSymbolsToTacky(symbols)` iterates the `GlobalSymbolTable`:
+- For each entry with `StaticAttr` and `init != NoInitializer`, emits an
+  `ir::StaticVariable` with the appropriate initial value (zero for `Tentative`).
+- `NoInitializer` entries (extern declarations) are skipped.
+
+### Expression Lowering
+
+Each expression type has a dedicated generation method:
+
+| AST node | IR output |
+|----------|-----------|
+| `IntegerLiteral` / `LongLiteral` | `Constant` |
+| `IntInit` / `LongInit` | `Constant` (compile-time static init) |
+| `Var` | `VarOp` (local) or `StaticVarOp` (static/global) |
+| `UnaryOperator` | `UnaryOp` instruction |
+| `BinaryOperator` | `BinaryOp` or `ICmpOp`; logical `&&`/`||` use short-circuit jumps |
+| `AssignmentOperator` | `Copy` instruction; result is the stored value |
+| `PrefixOperator` | Read → `BinaryOp` (add/sub 1) → `Copy` → return new value |
+| `PostfixOperator` | Read → save old value → `BinaryOp` → `Copy` → return old value |
+| `ConditionalExpr` | `JumpIfZero` / `Jump` + label structure |
+| `FunctionCallExpr` | `Invoke` instruction |
+| `CastExpr` | `SignExtend` or `Truncate` depending on direction |
+
+---
+
+## LLVM IR Backend (`include/mycc/CodeGen/llvm/LLVMIRGen.hpp`)
+
+`LLVMIRGenerator` is an alternative backend that lowers the AST directly to
+LLVM IR, bypassing SimpleIR entirely. Activated by the `--llvm` flag.
+
+It uses `llvm::IRBuilder<>` to emit instructions into an `llvm::Module`.
+
+Key implementation details:
+- Local variables are allocated with `alloca` in the function entry block
+  (classic SSA construction without phi nodes).
+- Global variables are emitted as `llvm::GlobalVariable` with appropriate
+  linkage (`ExternalLinkage` or `InternalLinkage`).
+- Short-circuit evaluation for `&&` and `||` is handled by dedicated helper
+  methods (`generateLogicalAnd`, `generateLogicalOr`) that emit conditional
+  branches into separate basic blocks.
+- `BreakBlocks` and `ContinueBlocks` are stacks of `llvm::BasicBlock*`
+  maintained as loops are entered and exited (LIFO, supporting nested loops).
+- `LabelBlocks` maps user label names to `llvm::BasicBlock*` for goto support.
+  (**Note:** goto/label generation is not yet connected in the LLVM backend —
+  see `ToDo/IMPROVEMENTS.md` §12.)
+
+The generated module is verified with `llvm::verifyModule` and can be printed
+as textual LLVM IR or compiled further with the LLVM toolchain.
+
+---
+
+## x86-64 Backend (`include/mycc/CodeGen/x64/`)
+
+### X64AST — Target-Specific IR Layer
+
+Before emitting text assembly, the code generator builds an `X64AST` — a
+model of x86-64 constructs that is still independent of text formatting.
+
+**Operands:**
+- `X64Int` — immediate integer value
+- `PseudoRegister` — virtual register (resolved to stack slot)
+- `PhysicalRegister` — actual hardware register (`%rax`, `%rcx`, etc.) with
+  explicit size (BYTE / DWORD / QWORD)
+- `X64Stack` — RBP-relative memory reference (`-8(%rbp)`)
+
+**Instructions:**
+- `X64Mov`, `X64Binary` (two-operand arithmetic), `X64Unary`
+- `X64Cmp`, `X64JmpCC` (conditional jump on flag)
+- `X64IDiv` (uses implicit RAX/RDX)
+- `X64Label`, `X64Ret`, `X64Call`
+
+### Code Generation Phases
+
+#### Phase 1: SimpleIR → X64AST
+
+IR instructions are translated one-to-one where possible. Key mappings:
+- `ir::Constant` → `X64Int`
+- `ir::Reg` and `ir::VarOp` → `PseudoRegister` (by name hash)
+- `ir::StaticVarOp` → RIP-relative memory reference
+- `ir::BinaryOp` → `X64Binary` with appropriate opcode
+- `ir::ICmpOp` → `X64Cmp` + `X64JmpCC`
+
+#### Phase 2: Pseudo-Register Allocation
+
+Every `PseudoRegister` is assigned a unique stack slot. Slots are allocated
+downward from `%rbp` in 8-byte units. The total frame size is computed and
+used in the function prologue (`sub $N, %rsp`).
+
+This is a simple *spill-everything* strategy — no physical register assignment
+beyond what the instruction fixup phase requires.
 
 #### Phase 3: Instruction Fixup
-Addresses x86-64 architectural constraints:
-- **Memory-to-memory operations**: Inserts intermediate register moves
-- **Division operations**: Ensures proper RAX/RDX register usage
-- **Shift operations**: Enforces CL register requirement for variable shifts
-- **Multiplication constraints**: Handles memory operand restrictions
 
-#### Phase 4: Assembly Generation
-Produces Intel syntax assembly with proper formatting:
-- Function prologue/epilogue generation
-- Label resolution and formatting
-- Platform-specific directive handling (Linux/macOS compatibility)
+x86-64 architectural constraints are enforced:
+- **Memory-to-memory moves:** insert an intermediate `%rax` move.
+- **`idiv`:** divisor must be in a register; quotient in `%rax`, remainder in
+  `%rdx` (RAX sign-extended to RDX:RAX via `cdq`/`cqo`).
+- **Shift amount:** must be in `%cl`; emit a move to `%cl` before the shift.
+- **`imul` with memory destination:** not allowed on x86-64; insert a
+  temporary register.
 
-### Variable Handling Strategy
+#### Phase 4: Assembly Emission
 
-Variables undergo a carefully designed transformation pipeline:
+Final Intel-syntax assembly is written to a `.s` file:
+- Function prologue: `push %rbp; mov %rsp, %rbp; sub $N, %rsp`
+- Function epilogue: `mov %rbp, %rsp; pop %rbp; ret`
+- Platform directives: `.globl` (Linux), `.globl` + `.text` (macOS)
+- Labels: function-local labels use `_` prefix convention where required
 
-1. **AST Level**: Variables represented as `Var` nodes with string names
-2. **IR Level**: Converted to `VarOp` operands maintaining name information
-3. **X64 Level**: Transformed to pseudo registers using deterministic name hashing
-4. **Final Assembly**: Allocated to stack memory locations
+---
 
-This approach ensures:
-- **Consistency**: Same variable names map to identical storage locations
-- **Scope Respect**: Variable lifetime matches C semantics
-- **Memory Safety**: Stack allocation provides automatic cleanup
+## Diagnostic Infrastructure (`include/mycc/Basic/Diagnostic.hpp`)
 
-### Optimization Considerations
+`DiagnosticsEngine` wraps LLVM's `SourceMgr` to attach source locations to
+error messages.
 
-The current implementation prioritizes correctness over optimization, implementing:
-- **Naive register allocation**: All values reside in memory
-- **Conservative instruction selection**: Explicit intermediate moves for safety
-- **Minimal peephole optimization**: Basic instruction combining only
+Diagnostic identifiers and message strings are defined in `Diagnostic.def`
+using an X-macro:
 
-Future optimization opportunities include:
-- Register pressure analysis for physical register allocation
-- Dead code elimination in IR
-- Constant folding and propagation
-- Common subexpression elimination
+```
+DIAG(err_undeclared_var, Error, "use of undeclared variable '{}'")
+```
+
+The `report` method uses `{fmt}` to format the message string:
+
+```cpp
+template <typename... Args>
+void report(SMLoc Loc, unsigned DiagID, Args&&... Arguments) {
+    std::string Msg = fmt::vformat(getDiagnosticText(DiagID),
+                                   fmt::make_format_args(Arguments...));
+    SrcMgr.PrintMessage(Loc, getDiagnosticKind(DiagID), Msg);
+    NumErrors += (Kind == SourceMgr::DK_Error);
+}
+```
+
+This provides precise source-location error messages pointing into the original
+`.c` file.
+
+---
+
+## Build System
+
+CMake is used with per-component static libraries:
+
+| Library | Contents |
+|---------|---------|
+| `libBasic.a` | TokenKinds, Diagnostic |
+| `libLexer.a` | Lexer, Token |
+| `libParser.a` | Parser |
+| `libAST.a` | ASTPrinter |
+| `libSema.a` | Sema, Scope, analyses |
+| `libCodeGen.a` | IRGen, X64CodeGen, LLVMIRGen |
+
+The final `mycc` executable links all libraries and `main.cpp`.
+
+LLVM is found via `find_package(LLVM)` and components are linked selectively
+(`LLVMCore`, `LLVMSupport`, `LLVMIRReader`, etc.).
+
+---
+
+## Command-Line Interface
+
+```
+mycc [options] <input.c>
+
+Options:
+  --lex       Run lexer only (no output file)
+  --parse     Run through parser (no output file)
+  --validate  Run through semantic analysis (no output file)
+  --tacky     Generate SimpleIR (no output file unless --print)
+  --codegen   Generate assembly without assembling to object file
+  --llvm      Use the LLVM backend; produces <input>.ll
+  --print     Print output to stdout instead of writing a file
+  (no flag)   Full compilation; produces <input>.s
+```
+
+---
 
 ## Implementation Patterns
 
-### Memory Management
-The compiler employs RAII principles with smart pointers for automatic memory management. Each compilation phase owns its output data structures, ensuring clear ownership semantics.
+### LLVM-Style RTTI
 
-### Error Handling
-Diagnostic reporting utilizes LLVM's diagnostic infrastructure for consistent error messaging with source location information.
+All AST and IR class hierarchies use discriminated enums and `classof`:
 
-### Extensibility
-The modular design facilitates feature additions through:
-- AST node hierarchy extension
-- IR instruction set expansion
-- Target architecture abstraction
+```cpp
+static bool classof(const Expr *E) {
+    return E->getKind() == Ek_UnaryOperator;
+}
+```
 
-This architecture provides a solid foundation for implementing additional C language features while maintaining code clarity and correctness.
+This allows `llvm::cast<>`, `llvm::dyn_cast<>`, and `llvm::isa<>` throughout
+the codebase without paying the overhead of `dynamic_cast`.
+
+### X-Macro `.def` Files
+
+`TokenKinds.def` and `Diagnostic.def` use the X-macro pattern. Including the
+`.def` file with a different `#define` of the macro generates different code
+from the same source of truth, keeping token names and diagnostic messages DRY.
+
+### RAII Scope Guards
+
+`EnterDeclScope` enters a new lexical scope on construction and exits it on
+destruction, ensuring `exitScope()` is always called even when early returns or
+error paths are taken.
+
+### Arena Allocation via `std::deque`
+
+Both `ASTContext` and `ir::Context` use `std::deque<std::unique_ptr<T>>` as
+allocation arenas. `std::deque` is chosen over `std::vector` specifically
+because it does not invalidate existing pointers on append — critical since raw
+pointers to nodes are stored extensively throughout the compiler.
