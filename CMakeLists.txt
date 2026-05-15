@@ -33,6 +33,7 @@ target_link_libraries(mycc
         Parser
         ASTPrinter
         CodeGen
+        Optimizer
         ${llvm_libs})
 
 enable_testing()

@@ -1,16 +1,21 @@
 #include "mycc/Lexer/Lexer.hpp"
 #include "mycc/Lexer/Token.hpp"
-#include "mycc/Sema/Sema.hpp"
+
 #include "mycc/Parser/Parser.hpp"
+
+#include "mycc/AST/AST.hpp"
+#include "mycc/AST/ASTContext.hpp"
+#include "mycc/AST/ASTPrinter.hpp"
+
+#include "mycc/Sema/Sema.hpp"
+
 #include "mycc/IR/SimpleIR.hpp"
 #include "mycc/CodeGen/IRGen.hpp"
 #include "mycc/CodeGen/x64/X64CodeGen.hpp"
 #include "mycc/CodeGen/llvm/LLVMIRGen.hpp"
 
+#include "mycc/Opt/LLVMOptimizer.hpp"
 
-#include "mycc/AST/AST.hpp"
-#include "mycc/AST/ASTContext.hpp"
-#include "mycc/AST/ASTPrinter.hpp"
 
 #include "mycc/Basic/Diagnostic.hpp"
 #include "mycc/Basic/TokenKinds.hpp"
@@ -38,24 +43,45 @@ bool tool_exists(const std::string &tool) {
     return std::system(check_cmd.c_str()) == 0;
 }
 
+
 void print_help() {
-    std::cout << "mycc - C Compiler\n"
-            << "Usage: mycc [options] <file>\n"
-            << "\nOptions:\n"
-            << "  --lex      Run lexer only\n"
-            << "  --parse    Run lexer and parser\n"
-            << "  --validate Run semantic analysis on top of parser\n"
-            << "  --tacky    Run lexer, parser and generate IR\n"
-            << "  --codegen  Run full compilation (lexer, parser, IR, codegen)\n"
-            << "  --llvm     Generate LLVM IR\n"
-            << "  -c         Instruct the compiler driver to generate an object file\n"
-            << "  --help     Show this help message\n"
-            << "If no option is provided, all the steps will run and the output assembly is generated.\n";
+    std::cout <<
+        "mycc - A C Compiler\n"
+        "Usage: mycc [options] <file>\n"
+        "\nCompilation steps (mutually exclusive, run all steps up to and including the selected one):\n"
+        "  --lex               Run the lexer only\n"
+        "  --parse             Run the lexer and parser\n"
+        "  --validate          Run lexer, parser, and semantic analysis\n"
+        "  --tacky             Run lexer, parser, semantic analysis, and IR generation\n"
+        "  --codegen           Run full compilation without assembling\n"
+        "  --llvm              Generate LLVM IR instead of x86-64 assembly (produces <file>.ll)\n"
+        "\nCode generation options:\n"
+        "  -O0                 No optimization (default)\n"
+        "  -O1                 Basic optimizations\n"
+        "  -O2                 Standard optimizations\n"
+        "  -O3                 Aggressive optimizations\n"
+        "  -Os                 Optimize for size\n"
+        "  -Oz                 Optimize aggressively for size\n"
+        "  --llvm-plugin <path> Load a user-provided LLVM pass plugin (.so)\n"
+        "                       Can be specified multiple times. Requires --llvm.\n"
+        "\nOutput options:\n"
+        "  -c                  Generate an object file instead of an executable\n"
+        "  --print             Print output to stdout\n"
+        "\nOther:\n"
+        "  --help, -h          Show this help message\n"
+        "\nIf no compilation step is specified, the compiler runs all steps and produces an executable.\n";
 }
 
 int main(int argc, char **argv) {
     std::vector<std::string> InputFiles;
     std::vector<std::string> args{argv + 1, argv + argc};
+
+    size_t i = 0, max_size = args.size();
+
+    std::optional<mycc::opt::LLVMOptimizer::OptLevel> optimizationLevel;
+    std::vector<std::string> llvmPluginsPaths;
+
+    std::unique_ptr<mycc::opt::LLVMOptimizer> llvmOptimizer = nullptr;
 
     std::unordered_map<std::string, std::function<void()> > options{
         // main options
@@ -86,18 +112,93 @@ int main(int argc, char **argv) {
         {"--print", [&]() { print_output = true; }},
         // other options
         {"--help", [&]() { print_help(); }},
-        {"-h", [&]() { print_help(); }}
+        {"-h", [&]() { print_help(); }},
+        {
+            "-O0", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::O0;
+            }
+        },
+        {
+            "-O1", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::O1;
+            }
+        },
+        {
+            "-O2", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::O2;
+            }
+        },
+        {
+            "-O3", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::O3;
+            }
+        },
+        {
+            "-Os", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::Os;
+            }
+        },
+        {
+            "-Oz", [&]() {
+                if (optimizationLevel.has_value()) {
+                    std::cerr << "Error, an optimization level was already provided\n";
+                    exit(1);
+                }
+                optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::Oz;
+            }
+        },
+        {
+            "--llvm-plugin", [&]() {
+                size_t nextI = i + 1;
+                if (nextI >= max_size) {
+                    std::cerr << "Error, --llvm-plugin needs a path to the plugin as argument.\n";
+                    exit(1);
+                }
+                llvmPluginsPaths.emplace_back(args[nextI]);
+                i = nextI;
+            }
+        }
     };
 
-    for (const auto &s: args) {
+    for (i = 0; i < max_size; i++) {
+        const auto &s = args[i];
         if (auto it = options.find(s); it != options.end())
             it->second();
-        else {
+        else
             InputFiles.push_back(s);
-        }
     }
 
     if (!lexer && !parser && !tacky && !codegen && !llvm_gen) compile = true;
+
+    if (llvm_gen && (optimizationLevel.has_value() || !llvmPluginsPaths.empty())) {
+        if (!optimizationLevel.has_value()) {
+            optimizationLevel = mycc::opt::LLVMOptimizer::OptLevel::O0;
+        }
+
+        llvmOptimizer = std::make_unique<mycc::opt::LLVMOptimizer>(
+            mycc::opt::LLVMOptimizer::Config{optimizationLevel.value(), std::move(llvmPluginsPaths)}
+        );
+    }
 
     for (const auto &F: InputFiles) {
         llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer> >
@@ -198,8 +299,21 @@ int main(int argc, char **argv) {
             llvm::LLVMContext LLVMCtx;
             mycc::codegen::llvmbackend::LLVMIRGenerator LLVMGen(LLVMCtx, F);
             LLVMGen.generateIR(*p, Sema.getGlobalSymbolTable());
+
+            auto Module = LLVMGen.takeModule();
+
+            // If the user specified any kind of optimization, apply the optimization
+            if (llvmOptimizer) {
+                std::string errMsg;
+                if (!llvmOptimizer->optimize(*Module, errMsg)) {
+                    std::cerr << "mycc: error: optimizer failed: " << errMsg << "\n";
+                    return 5;
+                }
+            }
+
+
             if (print_output) {
-                LLVMGen.print(llvm::outs());
+                Module->print(llvm::outs(), nullptr);
             }
 
             // Write LLVM IR to .ll file
@@ -215,7 +329,7 @@ int main(int argc, char **argv) {
                 std::cerr << "mycc: error: could not open output file '" << ll_name << "': " << EC.message() << "\n";
                 return 4;
             }
-            LLVMGen.print(OutFile);
+            Module->print(OutFile, nullptr);
             std::cout << "LLVM output: " << ll_name << '\n';
         }
         if (compile) {
