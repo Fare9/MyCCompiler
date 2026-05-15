@@ -52,9 +52,7 @@ public:
 
     [[nodiscard]] unsigned getBitWidth() const { return BitWidth; }
 
-    [[nodiscard]] std::string to_string() const override {
-        return "i" + std::to_string(BitWidth);
-    }
+    [[nodiscard]] std::string to_string() const override;
 
     static bool classof(const Type *T) { return T->getKind() == TK_Int; }
 };
@@ -65,7 +63,7 @@ public:
 class VoidType : public Type {
 public:
     VoidType() : Type(TK_Void) {}
-    [[nodiscard]] std::string to_string() const override { return "void"; }
+    [[nodiscard]] std::string to_string() const override;
 
     static bool classof(const Type *T) { return T->getKind() == TK_Void; }
 };
@@ -85,14 +83,7 @@ public:
     [[nodiscard]] Type* getReturnType() const { return ReturnTy; }
     [[nodiscard]] const std::vector<Type*>& getParamTypes() const { return ParamTys; }
 
-    [[nodiscard]] std::string to_string() const override {
-        std::string s = ReturnTy->to_string() + " (";
-        for (size_t i = 0; i < ParamTys.size(); ++i) {
-            if (i > 0) s += ", ";
-            s += ParamTys[i]->to_string();
-        }
-        return s + ")";
-    }
+    [[nodiscard]] std::string to_string() const override;
 
     static bool classof(const Type *T) { return T->getKind() == TK_Function; }
 };
@@ -153,17 +144,7 @@ public:
 
     [[nodiscard]] virtual StringRef getOpcodeName() const = 0;
 
-    [[nodiscard]] std::string to_string() const override {
-        std::string result = getOpcodeName().str();
-        if (getNumOperands() > 0) {
-            result += " ";
-            for (size_t i = 0; i < getNumOperands(); ++i) {
-                if (i > 0) result += ", ";
-                result += getOperand(i)->to_string();
-            }
-        }
-        return result;
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 /**
@@ -192,9 +173,7 @@ public:
     [[nodiscard]] int64_t getLongValue() const { return Val; }
     [[nodiscard]] int64_t getRawValue() const { return Val; }
 
-    [[nodiscard]] std::string to_string() const override {
-        return std::to_string(Val);
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Reg : public Operand {
@@ -207,9 +186,7 @@ public:
     [[nodiscard]] unsigned getID() const { return RegID; }
     [[nodiscard]] ir::Type* getType() const override { return Ty; }
 
-    [[nodiscard]] std::string to_string() const override {
-        return "%r" + std::to_string(RegID);
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class StaticVarOp : public Operand {
@@ -222,7 +199,7 @@ public:
     [[nodiscard]] std::string getName() const { return Identifier; }
     [[nodiscard]] ir::Type* getType() const override { return Ty; }
 
-    [[nodiscard]] std::string to_string() const override { return "@" + Identifier; }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class VarOp : public Operand {
@@ -235,7 +212,7 @@ public:
     [[nodiscard]] std::string getName() const { return Name; }
     [[nodiscard]] Type* getType() const override { return Ty; }
 
-    [[nodiscard]] std::string to_string() const override { return "%" + Name; }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class ParameterOp : public Operand {
@@ -248,7 +225,7 @@ public:
     [[nodiscard]] std::string getName() const { return Name; }
     [[nodiscard]] Type* getType() const override { return Ty; }
 
-    [[nodiscard]] std::string to_string() const override { return "%" + Name; }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 // ============================================================
@@ -263,7 +240,7 @@ public:
 
     [[nodiscard]] const std::string &get_identifier() const { return label_identifier; }
     [[nodiscard]] StringRef getOpcodeName() const override { return label_identifier; }
-    [[nodiscard]] std::string to_string() const override { return label_identifier; }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Copy : public Instruction {
@@ -278,9 +255,7 @@ public:
     [[nodiscard]] Value *getSrc() const { return getOperand(0); }
     [[nodiscard]] Value *getDst() const { return getOperand(1); }
     [[nodiscard]] StringRef getOpcodeName() const override { return "copy"; }
-    [[nodiscard]] std::string to_string() const override {
-        return "copy " + getDst()->to_string() + ", " + getSrc()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Mov : public Instruction {
@@ -295,9 +270,7 @@ public:
     [[nodiscard]] Value *getSrc() const { return getOperand(0); }
     [[nodiscard]] Value *getDst() const { return getOperand(1); }
     [[nodiscard]] StringRef getOpcodeName() const override { return "mov"; }
-    [[nodiscard]] std::string to_string() const override {
-        return "mov " + getDst()->to_string() + ", " + getSrc()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Ret : public Instruction {
@@ -313,9 +286,7 @@ public:
     [[nodiscard]] Value *getReturnValue() const { return getOperand(0); }
     [[nodiscard]] bool isVoidReturn() const { return getNumOperands() == 0; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "ret"; }
-    [[nodiscard]] std::string to_string() const override {
-        return isVoidReturn() ? "ret" : "ret " + getReturnValue()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Jump : public Instruction {
@@ -327,9 +298,7 @@ public:
     void setDst(Label *dst) { destination = dst; }
     [[nodiscard]] Label *getDst() const { return destination; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "jmp"; }
-    [[nodiscard]] std::string to_string() const override {
-        return "jmp " + getDst()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class JumpIfZero : public Instruction {
@@ -345,9 +314,7 @@ public:
     [[nodiscard]] Value *getCondition() const { return getOperand(0); }
     [[nodiscard]] Label *getDst() const { return destination; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "jz"; }
-    [[nodiscard]] std::string to_string() const override {
-        return "jz " + getCondition()->to_string() + ", " + getDst()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class JumpIfNotZero : public Instruction {
@@ -363,9 +330,7 @@ public:
     [[nodiscard]] Value *getCondition() const { return getOperand(0); }
     [[nodiscard]] Label *getDst() const { return destination; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "jnz"; }
-    [[nodiscard]] std::string to_string() const override {
-        return "jnz " + getCondition()->to_string() + ", " + getDst()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class UnaryOp : public Instruction {
@@ -390,16 +355,8 @@ public:
     [[nodiscard]] Value *getSource() const { return getOperand(0); }
     [[nodiscard]] UnaryOpKind getKind() const { return Kind; }
 
-    [[nodiscard]] StringRef getOpcodeName() const override {
-        if (Kind == Neg) return "neg";
-        if (Kind == Complement) return "complement";
-        return "not";
-    }
-
-    [[nodiscard]] std::string to_string() const override {
-        return dst->to_string() + " = " + getOpcodeName().str() + " " +
-               dst->getType()->to_string() + " " + getSource()->to_string();
-    }
+    [[nodiscard]] StringRef getOpcodeName() const override;
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class BinaryOp : public Instruction {
@@ -430,20 +387,8 @@ public:
     [[nodiscard]] Value *getRight() const { return getOperand(1); }
     [[nodiscard]] BinaryOpKind getKind() const { return Kind; }
 
-    [[nodiscard]] StringRef getOpcodeName() const override {
-        switch (Kind) {
-            case Add: return "add"; case Sub: return "sub"; case Mul: return "mul";
-            case Div: return "div"; case Rem: return "rem"; case And: return "and";
-            case Or:  return "or";  case Xor: return "xor"; case Sal: return "sal";
-            case Sar: return "sar"; default: return "";
-        }
-    }
-
-    [[nodiscard]] std::string to_string() const override {
-        return dst->to_string() + " = " + getOpcodeName().str() + " " +
-               dst->getType()->to_string() + " " +
-               getLeft()->to_string() + ", " + getRight()->to_string();
-    }
+    [[nodiscard]] StringRef getOpcodeName() const override;
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class ICmpOp : public Instruction {
@@ -473,20 +418,8 @@ public:
     [[nodiscard]] Value *getRight() const { return getOperand(1); }
     [[nodiscard]] CmpOpKind getKind() const { return Kind; }
 
-    [[nodiscard]] StringRef getOpcodeName() const override {
-        switch (Kind) {
-            case lt: return "lt"; case le: return "le"; case gt: return "gt";
-            case ge: return "ge"; case eq: return "eq"; case neq: return "neq";
-            default: return "";
-        }
-    }
-
-    [[nodiscard]] std::string to_string() const override {
-        // Use the left operand's type — both sides must be the same type for a comparison
-        const std::string ty = dynamic_cast<Operand *>(getOperand(0))->getType()->to_string();
-        return Dst->to_string() + " = icmp " + getOpcodeName().str() + " " +
-               ty + " " + getLeft()->to_string() + ", " + getRight()->to_string();
-    }
+    [[nodiscard]] StringRef getOpcodeName() const override;
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Invoke : public Instruction {
@@ -509,18 +442,7 @@ public:
     void setCalledFunction(StringRef funcName) { CalledFunction = funcName; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "call"; }
 
-    [[nodiscard]] std::string to_string() const override {
-        std::string s;
-        if (hasResult()) s = getResult()->to_string() + " = ";
-        s += "call " + (hasResult() ? getResult()->getType()->to_string() + " " : "void ");
-        s += getCalledFunction().str() + "(";
-        for (size_t i = 0; i < getNumOperands(); ++i) {
-            if (i > 0) s += ", ";
-            const auto *op = dynamic_cast<Operand *>(getOperand(i));
-            s += op->getType()->to_string() + " " + op->to_string();
-        }
-        return s + ")";
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class SignExtend : public Instruction {
@@ -533,11 +455,7 @@ public:
     [[nodiscard]] Operand *getSource() const { return dynamic_cast<Operand *>(getOperand(0)); }
     [[nodiscard]] Reg *getResult() const { return Result; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "sext"; }
-    [[nodiscard]] std::string to_string() const override {
-        return Result->to_string() + " = sext " +
-               getSource()->getType()->to_string() + " " + getSource()->to_string() +
-               " to " + Result->getType()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 class Truncate : public Instruction {
@@ -550,11 +468,7 @@ public:
     [[nodiscard]] Operand *getSource() const { return dynamic_cast<Operand *>(getOperand(0)); }
     [[nodiscard]] Reg *getResult() const { return Result; }
     [[nodiscard]] StringRef getOpcodeName() const override { return "trunc"; }
-    [[nodiscard]] std::string to_string() const override {
-        return Result->to_string() + " = trunc " +
-               getSource()->getType()->to_string() + " " + getSource()->to_string() +
-               " to " + Result->getType()->to_string();
-    }
+    [[nodiscard]] std::string to_string() const override;
 };
 
 // ============================================================
@@ -576,12 +490,7 @@ public:
     [[nodiscard]] int64_t getInitialValue() const { return InitValue; }
     [[nodiscard]] Type* getType() const { return Ty; }
 
-    [[nodiscard]] std::string to_string() const {
-        std::string result = "@" + Identifier + " = ";
-        if (!Global) result += "internal ";
-        result += "global " + Ty->to_string() + " " + std::to_string(InitValue);
-        return result;
-    }
+    [[nodiscard]] std::string to_string() const;
 };
 
 // ============================================================
@@ -620,22 +529,7 @@ public:
     [[nodiscard]] InstList::const_iterator begin() const { return Instructions.begin(); }
     [[nodiscard]] InstList::const_iterator end() const { return Instructions.end(); }
 
-    [[nodiscard]] std::string to_string() const {
-        std::string global_str = global ? ".global" : "";
-        std::string result = "define " + global_str + " " + get_name().str() + "(";
-        if (FuncTy) result = "define " + global_str + " " + FuncTy->getReturnType()->to_string() +
-                             " " + get_name().str() + "(";
-        for (auto *arg: args) result += arg->to_string() + ",";
-        if (!args.empty()) result.pop_back();
-        result += ") {\n";
-        for (const Instruction *inst: Instructions) {
-            if (const auto *label = dynamic_cast<const Label *>(inst))
-                result += label->to_string() + ":\n";
-            else
-                result += "  " + inst->to_string() + "\n";
-        }
-        return result + "}\n";
-    }
+    [[nodiscard]] std::string to_string() const;
 };
 
 // ============================================================
@@ -649,13 +543,10 @@ class Program {
     std::unique_ptr<Context> Ctx;
 
 public:
-    Program() : Ctx(std::make_unique<Context>()) {}
-    explicit Program(const StringRef Name) : Name(Name), Ctx(std::make_unique<Context>()) {}
+    Program();
+    explicit Program(const StringRef Name);
 
-    ~Program() {
-        for (const auto &F: Funcs) delete F;
-        for (const auto &SV: StaticVars) delete SV;
-    }
+    ~Program();
 
     [[nodiscard]] Context &getContext() const { return *Ctx; }
     [[nodiscard]] StringRef get_name() const { return Name; }
@@ -675,13 +566,7 @@ public:
     [[nodiscard]] StaticVarList::const_iterator static_vars_end() const { return StaticVars.end(); }
     [[nodiscard]] const StaticVarList &getStaticVars() const { return StaticVars; }
 
-    [[nodiscard]] std::string to_string() const {
-        std::string result = "; Program: " + get_name().str() + "\n\n";
-        for (const StaticVariable *sv: StaticVars) result += sv->to_string() + "\n";
-        if (!StaticVars.empty()) result += "\n";
-        for (const Function *func: Funcs) result += func->to_string() + "\n";
-        return result;
-    }
+    [[nodiscard]] std::string to_string() const;
 };
 
 // ============================================================
@@ -712,168 +597,37 @@ public:
 
     // ---- Type factory methods ----
 
-    IntType* getIntType(unsigned bitWidth) {
-        auto &ty = IntTypes[bitWidth];
-        if (!ty) ty = std::make_unique<IntType>(bitWidth);
-        return ty.get();
-    }
+    IntType* getIntType(unsigned bitWidth);
 
     IntType* getInt8Ty()  { return getIntType(8);  }
     IntType* getInt16Ty() { return getIntType(16); }
     IntType* getInt32Ty() { return getIntType(32); }
     IntType* getInt64Ty() { return getIntType(64); }
 
-    VoidType* getVoidTy() {
-        if (!VoidTy) VoidTy = std::make_unique<VoidType>();
-        return VoidTy.get();
-    }
+    VoidType* getVoidTy();
 
-    FunctionType* createFunctionType(Type* ret, std::vector<Type*> params) {
-        auto ft = std::make_unique<FunctionType>(ret, std::move(params));
-        FunctionType* ptr = ft.get();
-        FuncTypes.push_back(std::move(ft));
-        return ptr;
-    }
+    FunctionType* createFunctionType(Type* ret, std::vector<Type*> params);
 
     // ---- Value factory methods ----
 
-    Label *getOrCreateLabel(const std::string &name, bool isUserDefined = false) {
-        if (isUserDefined && Labels.contains(name))
-            return Labels[name];
-        std::string labelName = isUserDefined ? name : (name + "_" + std::to_string(LabelNextID++));
-        auto *label = new Label(labelName);
-        Values.emplace_back(label);
-        Labels[name] = label;
-        return label;
-    }
-
-    Jump *createJump(Label *label) {
-        auto *jump = new Jump(label);
-        Values.emplace_back(jump);
-        return jump;
-    }
-
-    JumpIfZero *createJZ(Value *cond, Label *label) {
-        auto *jz = new JumpIfZero(cond, label);
-        Values.emplace_back(jz);
-        return jz;
-    }
-
-    JumpIfNotZero *createJNZ(Value *cond, Label *label) {
-        auto *jnz = new JumpIfNotZero(cond, label);
-        Values.emplace_back(jnz);
-        return jnz;
-    }
-
-    Constant *createConstant(Type* ty, const int64_t value) {
-        assert(ty->getKind() == Type::TK_Int && "createConstant requires IntType");
-        const auto* intTy = llvm::cast<IntType>(ty);
-        if (intTy->getBitWidth() <= 32) {
-            const auto key = static_cast<int32_t>(value);
-            auto it = all_int_constants.find(key);
-            if (it != all_int_constants.end()) return it->second;
-            auto *c = new Constant(ty, value);
-            Values.emplace_back(c);
-            all_int_constants[key] = c;
-            return c;
-        } else {
-            auto it = all_long_constants.find(value);
-            if (it != all_long_constants.end()) return it->second;
-            auto *c = new Constant(ty, value);
-            Values.emplace_back(c);
-            all_long_constants[value] = c;
-            return c;
-        }
-    }
-
-    std::vector<Constant *> getAllConstants() const {
-        std::vector<Constant *> result;
-        for (const auto &[_, c]: all_int_constants)  result.emplace_back(c);
-        for (const auto &[_, c]: all_long_constants) result.emplace_back(c);
-        return result;
-    }
-
-    Reg *createReg(Type* ty) {
-        auto *RegVal = new Reg(NextRegID++, ty);
-        Values.emplace_back(RegVal);
-        return RegVal;
-    }
-
-    VarOp *getOrCreateVar(const StringRef Name, Type* ty) {
-        if (Variables.contains(Name)) return Variables[Name];
-        auto *newVar = new VarOp(Name, ty);
-        Values.emplace_back(newVar);
-        Variables[Name] = newVar;
-        return newVar;
-    }
-
-    StaticVarOp *getOrCreateStaticVar(const StringRef Name, ir::Type* ty) {
-        if (StaticVars.contains(Name)) return StaticVars[Name];
-        auto *newVar = new StaticVarOp(Name, ty);
-        Values.emplace_back(newVar);
-        StaticVars[Name] = newVar;
-        return newVar;
-    }
-
-    Copy *createCopy(Value *src, Value *dst) {
-        auto *copy = new Copy(src, dst);
-        Values.emplace_back(copy);
-        return copy;
-    }
-
-    Mov *createMov(Value *src, Value *dst) {
-        auto *MovInst = new Mov(src, dst);
-        Values.emplace_back(MovInst);
-        return MovInst;
-    }
-
-    Ret *createRet(Value *retval = nullptr) {
-        Ret *RetInst = retval ? new Ret(retval) : new Ret();
-        Values.emplace_back(RetInst);
-        return RetInst;
-    }
-
-    UnaryOp *createUnaryOp(Operand *src, UnaryOp::UnaryOpKind kind) {
-        Reg *dst = createReg(src->getType());
-        auto *UnaryInst = new UnaryOp(dst, src, kind);
-        Values.emplace_back(UnaryInst);
-        return UnaryInst;
-    }
-
-    BinaryOp *createBinaryOp(Operand *left, Operand *right, BinaryOp::BinaryOpKind kind) {
-        Reg *dst = createReg(left->getType());
-        auto *BinaryInst = new BinaryOp(dst, left, right, kind);
-        Values.emplace_back(BinaryInst);
-        return BinaryInst;
-    }
-
-    ICmpOp *createICmpOp(Operand *left, Operand *right, ICmpOp::CmpOpKind kind, Type* resultTy) {
-        Reg *dst = createReg(resultTy);
-        auto *cmp = new ICmpOp(dst, left, right, kind);
-        Values.emplace_back(cmp);
-        return cmp;
-    }
-
-    Invoke *createInvoke(const StringRef CalledFunction, const std::vector<Operand *> &operands, Type* resultTy) {
-        Reg *dst = createReg(resultTy);
-        auto *invoke = new Invoke(CalledFunction, operands, dst);
-        Values.emplace_back(invoke);
-        return invoke;
-    }
-
-    SignExtend *createSignExtend(Operand *src, Type* toType) {
-        Reg *dst = createReg(toType);
-        auto *signExtend = new SignExtend(src, dst);
-        Values.emplace_back(signExtend);
-        return signExtend;
-    }
-
-    Truncate *createTruncate(Operand *src, Type* toType) {
-        Reg *dst = createReg(toType);
-        auto *truncate = new Truncate(src, dst);
-        Values.emplace_back(truncate);
-        return truncate;
-    }
+    Label *getOrCreateLabel(const std::string &name, bool isUserDefined = false);
+    Jump *createJump(Label *label);
+    JumpIfZero *createJZ(Value *cond, Label *label);
+    JumpIfNotZero *createJNZ(Value *cond, Label *label);
+    Constant *createConstant(Type* ty, int64_t value);
+    std::vector<Constant *> getAllConstants() const;
+    Reg *createReg(Type* ty);
+    VarOp *getOrCreateVar(StringRef Name, Type* ty);
+    StaticVarOp *getOrCreateStaticVar(StringRef Name, ir::Type* ty);
+    Copy *createCopy(Value *src, Value *dst);
+    Mov *createMov(Value *src, Value *dst);
+    Ret *createRet(Value *retval = nullptr);
+    UnaryOp *createUnaryOp(Operand *src, UnaryOp::UnaryOpKind kind);
+    BinaryOp *createBinaryOp(Operand *left, Operand *right, BinaryOp::BinaryOpKind kind);
+    ICmpOp *createICmpOp(Operand *left, Operand *right, ICmpOp::CmpOpKind kind, Type* resultTy);
+    Invoke *createInvoke(StringRef CalledFunction, const std::vector<Operand *> &operands, Type* resultTy);
+    SignExtend *createSignExtend(Operand *src, Type* toType);
+    Truncate *createTruncate(Operand *src, Type* toType);
 };
 
 } // namespace mycc::ir

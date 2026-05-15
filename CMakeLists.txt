@@ -32,6 +32,7 @@ target_link_libraries(mycc
         Sema
         Parser
         ASTPrinter
+        IR
         CodeGen
         Optimizer
         ${llvm_libs})
