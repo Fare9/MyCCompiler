@@ -31,7 +31,7 @@ target_link_libraries(mycc
         Lexer
         Sema
         Parser
-        ASTPrinter
+        AST
         IR
         CodeGen
         Optimizer
