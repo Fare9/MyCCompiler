@@ -1,3 +1,4 @@
-add_library(ASTPrinter
+add_library(AST
     ASTPrinter.cpp
+    Type.cpp
 )

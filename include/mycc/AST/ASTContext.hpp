@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include "mycc/AST/Type.hpp"
 #include "mycc/Basic/LLVM.hpp"
 #include <memory>
 #include <deque>
