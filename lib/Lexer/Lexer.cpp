@@ -300,27 +300,39 @@ void Lexer::number(Token &Result) {
         ++End;
     }
 
-    // We start supporting long values, we can find
-    // long integer values
-    if (*End == 'l' || *End == 'L')
+    // Parse integer suffix per C11 §6.4.4.1:
+    //   [u|U] then [l|L|ll|LL], or [l|L|ll|LL] then [u|U]
+    const char *SuffixStart = End;
+    bool is_unsigned_specified = false;
+    // It can be useful later to check if some other type
+    // of value is specified
+    bool is_long_specified = false;
+    bool is_long_long_specified = false;
+
+    // check first for possible unsigned numbers
+    if (*End == 'u' || *End == 'U') { is_unsigned_specified = true; ++End; }
+    // check for longs
+    if (*End == 'l' || *End == 'L') {
+        char first = *End++;
+        // If we have ll or LL, this is good too
+        if (*End == first) { is_long_long_specified = true; ++End; }
+        // we only have l or L
+        else { is_long_specified = true; }
+    }
+
+    // check if it is unsigned
+    if (!is_unsigned_specified && (*End == 'u' || *End == 'U')) {
+        is_unsigned_specified = true;
         ++End;
+    }
 
-    // Check for invalid suffix (like letters after numbers)
-    // this would violate C's lexical rules (identifiers can't start
-    // with digits, numbers can't contain letters except in scientific notation).
-    if (*End && charinfo::isIdentifierHead(*End)) {
-        // Error: invalid suffix on integer literal
-        // You might want to advance End to consume the invalid suffix
-        // to help with error recovery
-        const char *SuffixStart = End;
-        while (*End && charinfo::isIdentifierBody(*End)) {
+    // Any remaining suffix chars (e.g. lL, LLL, uu) are invalid
+    if (*End == 'u' || *End == 'U' || *End == 'l' || *End == 'L' ||
+        charinfo::isIdentifierHead(*End)) {
+        while (*End && charinfo::isIdentifierBody(*End))
             ++End;
-        }
-
-        Diags.report(getLoc(),
-                     diag::err_invalid_suffix_integer,
+        Diags.report(getLoc(), diag::err_invalid_suffix_integer,
                      StringRef(SuffixStart, End - SuffixStart).str());
-
         Kind = tok::unknown;
     } else {
         Kind = tok::integer_literal;

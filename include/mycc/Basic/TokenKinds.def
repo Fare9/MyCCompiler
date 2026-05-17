@@ -90,6 +90,8 @@ KEYWORD(case, KEYALL)           // For switch from Chapter 8
 KEYWORD(default, KEYALL)        // For switch from Chapter 8
 KEYWORD(static, KEYALL)         // For linkage options from Chapter 10
 KEYWORD(extern, KEYALL)         // For linkage options from Chapter 10
+KEYWORD(signed, KEYALL)         // For supporting unsigned/signed types from Chapter 12
+KEYWORD(unsigned, KEYALL)       // For supporting unsigned/signed types from Chapter 12
 
 #undef KEYWORD
 #undef PUNCTUATOR

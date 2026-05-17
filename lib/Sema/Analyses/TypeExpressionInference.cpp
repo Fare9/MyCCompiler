@@ -90,8 +90,6 @@ Type *TypeExpressionInference::getType(Expr *expr, Scope *scope) {
     switch (expr->getKind()) {
         case Expr::Ek_Int:
             return getType(llvm::cast<IntegerLiteral>(expr), scope);
-        case Expr::Ek_Long:
-            return getType(llvm::cast<LongLiteral>(expr), scope);
         case Expr::Ek_Var:
             return getType(llvm::cast<Var>(expr), scope);
         case Expr::Ek_UnaryOperator:
@@ -125,12 +123,6 @@ Type *TypeExpressionInference::getType(IntegerLiteral *il, Scope *) {
     if (!il->getType())
         il->setType(Context.getIntTy());
     return il->getType();
-}
-
-Type *TypeExpressionInference::getType(LongLiteral *ll, Scope *) {
-    if (!ll->getType())
-        ll->setType(Context.getLongTy());
-    return ll->getType();
 }
 
 Type *TypeExpressionInference::getType(Var *v, Scope *scope) {

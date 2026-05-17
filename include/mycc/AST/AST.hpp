@@ -69,7 +69,6 @@ namespace mycc {
     public:
         enum ExprKind {
             Ek_Int,
-            Ek_Long,
             Ek_Var,
             Ek_UnaryOperator,
             Ek_BinaryOperator,
@@ -545,29 +544,11 @@ namespace mycc {
             return Value;
         }
 
+        // Alias for getType() — type is set via setType() in Sema.
+        [[nodiscard]] Type* getConstantType() const { return getType(); }
+
         static bool classof(const Expr *E) {
             return E->getKind() == Ek_Int;
-        }
-    };
-
-    /// @brief AST node for a long literal constant (e.g. '1000L').
-    class LongLiteral : public Expr {
-        SMLoc Loc;
-        llvm::APSInt Value;
-    public:
-        LongLiteral(SMLoc Loc, llvm::APSInt Value) : Expr(Ek_Long), Loc(Loc), Value(std::move(Value)) {
-        }
-
-        llvm::APSInt &getValue() {
-            return Value;
-        }
-
-        [[nodiscard]] const llvm::APSInt &getValue() const {
-            return Value;
-        }
-
-        static bool classof(const Expr *E) {
-            return E->getKind() == Ek_Long;
         }
     };
 

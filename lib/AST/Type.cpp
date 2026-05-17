@@ -7,8 +7,10 @@ int BuiltinType::integerRank(BuiltinType::BuiltinKind K) {
         case BuiltinType::Bool: return 0;
         case BuiltinType::Char: return 1;
         case BuiltinType::Short: return 2;
-        case BuiltinType::Int: return 3;
-        case BuiltinType::Long: return 4;
+        case BuiltinType::Int:  return 3;
+        case BuiltinType::UInt: return 3;
+        case BuiltinType::Long:  return 4;
+        case BuiltinType::ULong: return 4;
         default: return -1; // Void or unknown — not promotable
     }
 }
@@ -23,8 +25,12 @@ std::string BuiltinType::to_string() {
             return "short";
         case Int:
             return "int";
+        case UInt:
+            return "unsigned int";
         case Long:
             return "long";
+        case ULong:
+            return "unsigned long";
         case Void:
             return "void";
         default:

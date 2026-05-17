@@ -39,7 +39,9 @@ class ASTContext {
 
     // Some of the canonical types, never duplicated
     BuiltinType *IntTy;
+    BuiltinType *UIntTy;
     BuiltinType *LongTy;
+    BuiltinType *ULongTy;
     BuiltinType *VoidTy;
     
 public:
@@ -47,8 +49,12 @@ public:
         : SrcMgr(SrcMgr), FileName(FileName) {
         auto i = std::make_unique<BuiltinType>(BuiltinType::Int);
         IntTy = i.get(); Types.push_back(std::move(i));
+        auto ui = std::make_unique<BuiltinType>(BuiltinType::UInt);
+        UIntTy = ui.get(); Types.push_back(std::move(ui));
         auto l = std::make_unique<BuiltinType>(BuiltinType::Long);
         LongTy = l.get(); Types.push_back(std::move(l));
+        auto ul = std::make_unique<BuiltinType>(BuiltinType::ULong);
+        ULongTy = ul.get(); Types.push_back(std::move(ul));
         auto v = std::make_unique<BuiltinType>(BuiltinType::Void);
         VoidTy = v.get(); Types.push_back(std::move(v));
     }
@@ -122,14 +128,18 @@ public:
 
     BuiltinType* getBuiltInType(BuiltinType::BuiltinKind Kind) {
         if (Kind == BuiltinType::Int) return IntTy;
+        if (Kind == BuiltinType::UInt) return UIntTy;
         if (Kind == BuiltinType::Long) return LongTy;
+        if (Kind == BuiltinType::ULong) return ULongTy;
         if (Kind == BuiltinType::Void) return VoidTy;
         return nullptr;
     }
 
-    BuiltinType* getIntTy()  { return IntTy;  }
-    BuiltinType* getLongTy() { return LongTy; }
-    BuiltinType* getVoidTy() { return VoidTy; }
+    BuiltinType* getIntTy()   { return IntTy;  }
+    BuiltinType* getUIntTy()  { return UIntTy; }
+    BuiltinType* getLongTy()  { return LongTy; }
+    BuiltinType* getULongTy() { return ULongTy; }
+    BuiltinType* getVoidTy()  { return VoidTy; }
 };
 
 }

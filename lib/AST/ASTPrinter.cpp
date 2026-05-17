@@ -121,8 +121,6 @@ std::string ASTPrinter::print(const Expr* expr, int indent) {
     switch (expr->getKind()) {
         case Expr::Ek_Int:
             return printIntegerLiteral(dynamic_cast<const IntegerLiteral*>(expr), indent);
-        case Expr::Ek_Long:
-            return printLongLiteral(dynamic_cast<const LongLiteral*>(expr), indent);
         case Expr::Ek_Var:
             return printVar(dynamic_cast<const Var*>(expr), indent);
         case Expr::Ek_UnaryOperator:
@@ -158,11 +156,12 @@ std::string ASTPrinter::printReturnStatement(const ReturnStatement* stmt, int in
 }
 
 std::string ASTPrinter::printIntegerLiteral(const IntegerLiteral* expr, int indent) {
-    return getIndent(indent) + "IntegerLiteral: " + std::to_string(expr->getValue().getSExtValue()) + "\n";
-}
-
-std::string ASTPrinter::printLongLiteral(const LongLiteral* expr, int indent) {
-    return getIndent(indent) + "LongLiteral: " + std::to_string(expr->getValue().getSExtValue()) + "\n";
+    std::string typeName = expr->getType() ? expr->getType()->to_string() : "unknown";
+    const auto &val = expr->getValue();
+    std::string valStr = val.isUnsigned()
+        ? std::to_string(val.getZExtValue())
+        : std::to_string(val.getSExtValue());
+    return getIndent(indent) + "IntegerLiteral <" + typeName + ">: " + valStr + "\n";
 }
 
 std::string ASTPrinter::printIntInit(const IntInit* expr, int indent) {

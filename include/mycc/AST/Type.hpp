@@ -52,7 +52,9 @@ namespace mycc {
             Char,
             Short,
             Int,
+            UInt,
             Long,
+            ULong,
             Void,
             // For the moment, we can include in the future more
         };

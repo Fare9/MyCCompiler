@@ -11,10 +11,18 @@ namespace {
 /// and IntInit/LongInit nodes.
 llvm::Constant *getStaticInitConstant(const mycc::Expr &E, llvm::Type *Ty) {
     switch (E.getKind()) {
-        case mycc::Expr::Ek_Int:
-            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::IntegerLiteral>(E).getValue().getExtValue());
-        case mycc::Expr::Ek_Long:
-            return llvm::ConstantInt::get(Ty, llvm::cast<mycc::LongLiteral>(E).getValue().getExtValue());
+        case mycc::Expr::Ek_Int: {
+            auto &constant = llvm::cast<mycc::IntegerLiteral>(E);
+            mycc::Type *type = constant.getConstantType();
+
+            if (auto *builtin = llvm::dyn_cast<mycc::BuiltinType>(type)) {
+                auto builtin_kind = builtin->getBuiltinKind();
+                if (builtin_kind == mycc::BuiltinType::Int)
+                    return llvm::ConstantInt::get(Ty, constant.getValue().getExtValue());
+                if (builtin_kind == mycc::BuiltinType::Long)
+                    return llvm::ConstantInt::get(Ty, constant.getValue().getExtValue());
+            }
+        }
         case mycc::Expr::Ek_IntInit:
             return llvm::ConstantInt::get(Ty, llvm::cast<mycc::IntInit>(E).getValue());
         case mycc::Expr::Ek_LongInit:
@@ -547,7 +555,6 @@ void LLVMIRGenerator::generateDeclaration(const VarDeclaration &Decl) {
 llvm::Value *LLVMIRGenerator::generateExpression(const Expr &E) {
     switch (E.getKind()) {
         case Expr::Ek_Int:
-        case Expr::Ek_Long:
         case Expr::Ek_IntInit:
         case Expr::Ek_LongInit:
             return generateConstantExpression(E);
@@ -575,10 +582,18 @@ llvm::Value *LLVMIRGenerator::generateExpression(const Expr &E) {
 
 llvm::Value *LLVMIRGenerator::generateConstantExpression(const Expr &Lit) const {
     switch (Lit.getKind()) {
-        case Expr::Ek_Int:
-            return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), llvm::cast<IntegerLiteral>(Lit).getValue());
-        case Expr::Ek_Long:
-            return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), llvm::cast<LongLiteral>(Lit).getValue());
+        case Expr::Ek_Int: {
+            auto &constant = llvm::cast<mycc::IntegerLiteral>(Lit);
+            mycc::Type *type = constant.getConstantType();
+
+            if (auto *builtin = llvm::dyn_cast<mycc::BuiltinType>(type)) {
+                auto builtin_kind = builtin->getBuiltinKind();
+                if (builtin_kind == mycc::BuiltinType::Int)
+                    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), constant.getValue());
+                if (builtin_kind == mycc::BuiltinType::Long)
+                    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), constant.getValue());
+            }
+        }
         case Expr::Ek_IntInit:
             return llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), llvm::cast<IntInit>(Lit).getValue());
         case Expr::Ek_LongInit:

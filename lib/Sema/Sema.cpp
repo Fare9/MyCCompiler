@@ -4,6 +4,8 @@
 #include <cassert>
 #include <ranges>
 
+#include "mycc/Lexer/NumericLiteralParser.hpp"
+
 using namespace mycc;
 
 
@@ -641,24 +643,53 @@ void Sema::actOnSwitchStatement(BlockItems &Items, SMLoc Loc, Expr *Cond, Statem
 }
 
 Expr *Sema::actOnConstLiteral(SMLoc Loc, StringRef Literal) const {
-    const bool isLong = Literal.ends_with_insensitive("l");
-    const StringRef digits = isLong ? Literal.drop_back() : Literal;
+    NumericLiteralParser parser(Literal);
 
-    // Parse into 65 bits to detect overflow beyond long
-    llvm::APInt Value(65, digits, 10);
-    if (Value.ugt(llvm::APInt(65, INT64_MAX))) {
-        Diags.report(Loc, diag::err_long_literal_too_large);
+    if (!parser.isCorrect()) {
+        if (parser.isOverflow())
+            Diags.report(Loc, diag::err_long_literal_too_large);
+        // Otherwise the Lexer already reported the invalid suffix.
         return nullptr;
     }
 
+    const llvm::APInt &value    = parser.getValue(); // 64-bit
+    const bool         isSigned = parser.isSigned();
+    const bool         isLong   = parser.isLong();
+
     Expr *expr = nullptr;
-    // Unsuffixed and fits in int → IntegerLiteral, everything else → LongLiteral
-    if (!isLong && Value.ule(llvm::APInt(65, INT32_MAX))) {
-        expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(Value.trunc(32), false));
+
+    if (isLong) {
+        // Explicit l/L suffix — must fit in long or unsigned long.
+        if (isSigned && value.ugt(llvm::APInt(64, (uint64_t)INT64_MAX))) {
+            Diags.report(Loc, diag::err_long_literal_too_large);
+            return nullptr;
+        }
+        auto *ty = isSigned ? Context.getLongTy() : Context.getULongTy();
+        expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(value, !isSigned));
+        expr->setType(ty);
+    } else if (isSigned) {
+        // No suffix — auto-promote signed value to long if it doesn't fit in int.
+        if (value.ule(llvm::APInt(64, (uint64_t)INT32_MAX))) {
+            expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(value.trunc(32), false));
+            expr->setType(Context.getIntTy());
+        } else if (value.ule(llvm::APInt(64, (uint64_t)INT64_MAX))) {
+            expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(value, false));
+            expr->setType(Context.getLongTy());
+        } else {
+            Diags.report(Loc, diag::err_long_literal_too_large);
+            return nullptr;
+        }
     } else {
-        expr = Context.createExpression<LongLiteral>(Loc, llvm::APSInt(Value.trunc(64), false));
+        // u/U suffix without l/L — auto-promote to unsigned long if needed.
+        if (value.ule(llvm::APInt(64, (uint64_t)UINT32_MAX))) {
+            expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(value.trunc(32), true));
+            expr->setType(Context.getUIntTy());
+        } else {
+            expr = Context.createExpression<IntegerLiteral>(Loc, llvm::APSInt(value, true));
+            expr->setType(Context.getULongTy());
+        }
     }
-    typeExpressionInference->getType(expr, CurrentScope);
+
     return expr;
 }
 

@@ -22,7 +22,6 @@ public:
 
     Type* getType(Expr*, Scope*);
     Type* getType(IntegerLiteral*, Scope*);
-    Type* getType(LongLiteral*, Scope*);
     Type* getType(Var*, Scope*);
     Type* getType(UnaryOperator*, Scope*);
     Type* getType(BinaryOperator*, Scope*);
